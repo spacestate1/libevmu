@@ -147,13 +147,15 @@ EVMU_EXPORT EVMU_BIOS_MODE EvmuRom_biosMode   (GBL_CSELF) GBL_NOEXCEPT;
  *  @{
  */
 //! Loads a BIOS image from the path given by \p pPath
-EVMU_EXPORT EVMU_RESULT EvmuRom_loadBios      (GBL_SELF, const char* pPath)  GBL_NOEXCEPT;
+EVMU_EXPORT EVMU_RESULT EvmuRom_loadBios      (GBL_SELF, const char* pPath)   GBL_NOEXCEPT;
+//! Overrides the auto-detected \p type of the currently-loaded BIOS image
+EVMU_EXPORT EVMU_RESULT EvmuRom_setBiosType   (GBL_SELF, EVMU_BIOS_TYPE type) GBL_NOEXCEPT;
 //! Unloads any currently-loaded BIOS image, returning to software emulation
-EVMU_EXPORT EVMU_RESULT EvmuRom_unloadBios    (GBL_SELF)                     GBL_NOEXCEPT;
+EVMU_EXPORT EVMU_RESULT EvmuRom_unloadBios    (GBL_SELF)                      GBL_NOEXCEPT;
 //! Makes a firmware or BIOS subroutine call at the entry point given by \p entry
-EVMU_EXPORT EvmuAddress EvmuRom_callBios      (GBL_SELF, EvmuAddress entry)  GBL_NOEXCEPT;
+EVMU_EXPORT EvmuAddress EvmuRom_callBios      (GBL_SELF, EvmuAddress entry)   GBL_NOEXCEPT;
 //! Enables or disables skipping the BIOS date/time setup based on the value of \p enableSkip
-EVMU_EXPORT EVMU_RESULT EvmuRom_skipBiosSetup (GBL_SELF, GblBool enableSkip) GBL_NOEXCEPT;
+EVMU_EXPORT EVMU_RESULT EvmuRom_skipBiosSetup (GBL_SELF, GblBool enableSkip)  GBL_NOEXCEPT;
 //! @}
 
 /*! \name Date/Time Management

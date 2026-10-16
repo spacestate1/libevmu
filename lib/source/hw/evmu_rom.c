@@ -14,6 +14,12 @@ EVMU_EXPORT EVMU_BIOS_TYPE EvmuRom_biosType(const EvmuRom* pSelf) {
     return pSelf_->eBiosType;
 }
 
+EVMU_EXPORT EVMU_RESULT EvmuRom_setBiosType(EvmuRom* pSelf, EVMU_BIOS_TYPE type) {
+    EvmuRom_* pSelf_ = EVMU_ROM_(pSelf);
+    pSelf_->eBiosType = type;
+    return GBL_RESULT_SUCCESS;
+}
+
 EVMU_EXPORT EVMU_BIOS_MODE EvmuRom_biosMode(const EvmuRom* pSelf) {
     if(EvmuRom_biosType(pSelf) == EVMU_BIOS_TYPE_EMULATED)
         return EVMU_BIOS_MODE_UNKNOWN;
