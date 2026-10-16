@@ -111,6 +111,13 @@ cmake -DEVMU_ENABLE_TESTS=ON ..
 cmake --build . 
 ```
 
+# Deploying to an ESP32 Board (This Fork) #
+This fork vendors libEVMU as an ESP-IDF component (see `vmu/components/evmu`) for a Dreamcast VMU emulator running on a Waveshare ESP32-S3-ePaper-1.54 board. After `idf.py build` from `vmu/`, flash a connected board directly with the command it prints, or run it yourself:
+```
+python -m esptool --chip esp32s3 -b 460800 --before default-reset --after hard-reset write-flash --flash-mode dio --flash-size 8MB --flash-freq 80m 0x0 build/bootloader/bootloader.bin 0x8000 build/partition_table/partition-table.bin 0x10000 build/vmu.bin 0x210000 build/storage.bin
+```
+`idf.py -p PORT flash` does the same thing.
+
 # Credits #
 Author
 - Falco Girgis
