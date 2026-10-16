@@ -103,7 +103,12 @@ static EVMU_RESULT EvmuIMemory_write_(EvmuIMemory* pSelf,
                                       const void*  pData,
                                       size_t*      pBytes)
 {
-    GblObject_setProperty(GBL_OBJECT(pSelf), "dataChanged", GBL_TRUE);
+    /* The "dataChanged" property declared above is meant to be overridden by
+     * each implementing peripheral (EvmuRom, EvmuRam, EvmuWram, EvmuFlash),
+     * but none of them actually wire up a setter for it, so writing it here
+     * always failed with GBL_RESULT_ERROR_INVALID_PROPERTY, logging a
+     * spurious error on every single memory write. Leave it unset until a
+     * peripheral implements it for real. */
     GBL_EMIT(pSelf, "dataChange", base, *pBytes, pData);
     return GBL_RESULT_SUCCESS;
 }
