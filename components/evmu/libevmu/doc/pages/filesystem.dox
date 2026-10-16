@@ -1,0 +1,311 @@
+/*! \page filesystem Filesystem
+    \brief Flash 8-Bit FAT Filesystem Layout
+
+    A formatted VMU's flash contains a fairly standard 8-bit FAT filesystem,
+    used by the memory card functionality to store DATA and GAME files.
+
+    \tableofcontents
+
+    \section fs_memory_map Memory Map
+    Flash memory is split into a series of equal-sized "blocks", which is the
+    smallest unit of data which can be read from or written to flash. A
+    standard-sized VMU has 256 total blocks of 512 bytes each, giving a total
+    capacity of 128KB.
+
+    The following is the generalized memory map of the flash address space for
+    a single formatted VMU partition, along with its contents and region names:
+    
+    |Block|Contents     |Region|
+    |-----|-------------|------|
+    |0    |Game File    |User  | 
+    |...  |^            |^     |
+    |...  |^            |^     |
+    |...  |Data Files   |^     |
+    |...  |^            |^     |
+    |...  |^            |^     |
+    |...  |^            |^     |
+    |...  |^            |^     |
+    |...  |^            |^     |
+    |...  |^            |^     |
+    |...  |Reserved     |Hidden|    
+    |...  |^            |^     |
+    |...  |^            |^     |
+    |...  |^            |^     |
+    |...  |^            |^     |
+    |...  |Directory    |System|
+    |...  |^            |^     |
+    |...  |^            |^     |
+    |...  |FAT          |^     |
+    |N    |Root         |^     |
+
+    \note
+    Despite the fact that there was only ever one volume memory card released
+    commercially, and all "extended" memory cards used multiple switchable
+    banks containing the same sized volumes, the information presented here is
+    given for a generically-sized VMU, as these are technically supported by
+    the Maple protocol and many commercial games recognize up to 1MB sizes.
+
+    \note
+    The default values for standard-sized VMUs are also given in the field
+    descriptions.
+
+    \section fs_system System Region
+    The system region comprises three different subregions: the Root block,
+    the FAT blocks, and the Directory blocks. All three must be present and
+    correctly configured for a well-behaved filesystem.
+
+    \subsection fs_root Root
+    The Root block (or Superblock) is essentially a single block which is
+    reserved for describing the volume and the layout of its filesystem
+    regions. It is typically located within the last indexable block of the
+    filesystem.
+
+    |Byte |0   |1   |2   |3   |4   |5   |6   |7   |8   |9   |A   |B   |C   |D   |E   |F   |
+    |-----|----|----|----|----|----|----|----|----|----|----|----|----|----|----|----|----|
+    |0x000|<center>Magic</center>||||||||||||||||
+    |0x010|<center>Volume Label</center>||||||||||||||||
+    |0x020|^||||||||||||||||
+    |0x030|<center>Timestamp</center>||||||||<center>Reserved</center>||||||||
+    |0x040|Volume Last||<center>Partition</center>||<center>Root</center>||<center>FAT First</center>||FAT Size||DIR Last||DIR Size||Icon|Sort|
+    |0x050|Hidden First||Hidden Size||Game First||Game Size||<center>Reserved</center>||||||||
+    |0x060|<center>Reserved</center>||||||||||||||||
+    |...  |^||||||||||||||||
+    |0x1F0|^||||||||||||||||
+
+    <p><b>[0x000] Magic (16 bytes):</b><br>
+    A 16-byte region where the byte value `0x55` must be repeated in order to
+    signify that the volume is properly formatted and initialized to the VMU
+    and Dreamcast BIOSes.</p>
+
+    <p><b>[0x010] Volume Label (32 bytes):</b><br>
+    From the Maple protocol's perspective, the Volume Label is described as
+    being an arbitrary user identifier for the volume, which can contain
+    anything. In reality, it's not used by the VMU, but it has the following
+    specific format for the Dreamcast's BIOS:<br>
+    |Offset   |Size|Name        |Description|
+    |---------|----|------------|-----------|
+    |0x00     |1   |custom_color|Set to `0x01` if using custom volume color, otherwise `0x00`.| 
+    |0x01     |1   |blue        |`0-255` value for the blue channel of the custom volume color. |
+    |0x02     |1   |green       |`0-255` value for the green channel of the custom volume color. |
+    |0x03     |1   |red         |`0-255` value for the red channel of the custom volume color. |
+    |0x04     |1   |alpha       |`0-255` value for the alpha channel of the custom volume color (`0`: opaque, `255`: transparent).|
+    |0x05-0x20|27  |unused      |All bytes set to `0x00`.|      
+    \note
+    Most likely these 27 additional bytes could store anything and will be gracefully ignored by the DC's BIOS.
+    </p>
+
+    <p><b>[0x030] Timestamp (8 bytes):</b><br>
+    The date and time at which the VMU was last formatted.<br>
+    |Offset   |Size|Name        |Description|
+    |---------|----|------------|-----------|
+    |0x00     |1   |century     |First two digits of the AD year (`00-99`). | 
+    |0x01     |1   |year        |Last two digits of the AD year (`00-99`). |
+    |0x02     |1   |month       |Month (`1=Jan thru 12=Dec`). |
+    |0x03     |1   |day         |Day of the month (`1-31`). |
+    |0x04     |1   |hour        |Hour of the day (`0-23`). |
+    |0x05     |1   |minute      |Minute of the hour (`0-59`). |
+    |0x06     |1   |second      |Second of the minute (`0-59`). |
+    |0x07     |1   |week_day    |Day of the week (`0=Mon thru 6=Sun`)
+    \note
+    All values within the timestamp are in binary-coded decimal (BCD) format!
+    </p>
+
+    <p><b>[0x040] Volume Last (2 bytes):</b><br>
+    The last indexable block on the volume or total # of blocks in the volume minus 1. (default: `255`).</p>
+
+    <p><b>[0x042] Partition (2 bytes):</b><br>
+    Partition # for this volume (default: `0x00`).</p>
+
+    <p><b>[0x044] Root (2 bytes):</b><br>
+    Block # of (this) root block (default: `255`).</p>
+
+    <p><b>[0x046] FAT First (2 bytes):</b><br>
+    Block # of the first FAT block (default: `254`).</p>
+
+    <p><b>[0x048] FAT Size (2 bytes):</b><br>
+    Size (in blocks) of the FAT region (default: `1`).</p>
+
+    <p><b>[0x04a] DIR Last (2 bytes):</b><br>
+    Block # of the last Directory block (default: `253`).</p>
+
+    <p><b>[0x04c] DIR Size (2 bytes):</b><br>
+    Size (in blocks) of the Directory region (default: `13`).</p>
+
+    <p><b>[0x04e] Icon (1 byte):</b><br>
+    VMU volume icon as displayed within the Dreamcast's BIOS (values: `0-123`).</p>
+
+    <p><b>[0x04f] Sort (1 byte):</b><br>
+    Unknown or unused flag (default: `0x00`).
+    \note
+    Perhaps for sorting order within the DC's BIOS?
+
+    <p><b>[0x050] Hidden First (2 bytes):</b><br>
+    Block # of the first Hidden block (default: `200`).</p>
+
+    <p><b>[0x052] Hidden Size (2 bytes):</b><br>
+    Size (in blocks) of the Hidden region (default: `41`).</p>
+
+    <p><b>[0x054] Game First (2 bytes):</b><br>
+    Block # where the first block of a GAME file must be written (default: `0`).</p>
+
+    <p><b>[0x056] Game Size (2 bytes):</b><br>
+    Largest size (in blocks) of a GAME file (default: `128`).</p>
+
+    <p><b>[0x058] Reserved (408+ bytes):</b><br>
+    Claimed to be reserved, all filled with `0x00`; however, it's unlikely that these bytes actually have to be zero'd out. Most likely they can be used for arbitrary storage.</p>
+
+    \subsection fs_fat FAT
+    The File Allocation Table (FAT) subregion within the filesystem is a
+    contiguous array of entries, starting at the block given by `FAT First`
+    and growing <i>upwards</i> to the block located at
+    `FAT First + FAT Size - 1`. 
+
+    The FAT contains a 16-bit FAT entry for every block in the filesystem,
+    meaning its size should be `2 * Total Number of Blocks / Block size`, or
+    1 block for the default 256 block VMU volume.
+
+    The address of a given block's FAT entry is calculated by:
+    `Fat Entry for Block N = Fat First * Block Size + 2 * N`.
+
+    Each FAT Entry contains one of the following values:
+
+    |Value   |Name        |Description                 |
+    |--------|------------|----------------------------|
+    |`0xfffc`|Unallocated |The block is unused or free.|
+    |`0xffff`|Damaged     |The block has been damaged and its contents are to be allocated from the Hidden region.|
+    |`0xfffa`|Last In File|The block is the last one within its file and has no next block.|
+    |Other   |Next In File|The block is proceeded by the another block in the file.|
+
+    The FAT Entry should immediately tell you whether a block is in-use, free,
+    or damaged. In the case of an in-use block, its FAT Entry should always
+    contain the block # of the next block in the file sequence, creating a
+    linked-list of blocks, whose next pointers are its FAT Entries, with the
+    final block within the file terminating with a FAT Entry value of `0xfffa`.
+
+    \note
+    When formatting a VMU, the FAT Entries for System blocks are such that each
+    subregion is treated like a contiguously-stored file. The FAT Entry for the
+    Root Block should be `0xfffa`. The FAT Entries for the FAT should form a
+    linked-list starting at `FAT First`, with each Entry pointing to the next
+    block in the sequence up to the last block, which should be terminated with
+    `0xfffa`. The FAT Entries for the Directory should be linked in a similar
+    fashion; however, they point in the opposite direction, as the Directory
+    grows from highest-to-lowest block order.
+
+    \subsection fs_dir Directory
+    The Directory is a subregion within the System region which contains the
+    file-listing for all files present within the filesystem. The Directory is
+    divided into a series of Directory Entries.
+
+    \note
+    Empirical testing has shown that commercial Dreamcast games are expecting
+    a Directory size large enough so that every block within the User Region
+    can be given its own Directory Entry. For a standard 200 user-block VMU,
+    this is `200 * 32` = 6400 bytes / `512` bytes per block = 12.5 Directory
+    blocks, or rounded up, the default value of `13` for a freshly formatted
+    VMU.
+
+    Each 32-byte Directory Entry has the following format:
+
+    |Byte |0   |1   |2   |3   |4   |5   |6   |7   |8   |9   |A   |B   |C   |D   |E   |F   |
+    |-----|----|----|----|----|----|----|----|----|----|----|----|----|----|----|----|----|
+    |0x000|Type|Copy|Start FAT||<center>File Name</center>||||||||||||
+    |0x010|<center>Timestamp</center>||||||||Size||Header||<center>Reserved</center>||||
+
+    <p><b>[0x000] Type (1 byte):</b><br>
+    The type of file described by the Directory Entry:
+        - `0x00`: None
+        - `0x33`: Data
+        - `0xcc`: Game
+    </p>
+
+    <p><b>[0x001] Copy (1 byte):</b><br>
+    Whether the file can be copied or not (from within the Dreamcast or VMU
+    BIOS menus):
+        - `0xff`: Copy Protected
+        - Other: Copyable
+    </p>
+
+    <p><b>[0x002] Start FAT (2 bytes):</b><br>
+    The first block containing the file data. Subsequent blocks are determined
+    by following each block's FAT Entries.</p>
+
+    <p><b>[0x004] Filename (12 bytes):</b><br>
+    Name of the file in Shift-JIS encoding WITHOUT `NULL` termination!</p>
+
+    <p><b>[0x010] Timestamp (8 bytes):</b><br>
+    Date + time of the last time the file was written to, in the same BCD
+    8-byte format as in the Root Block.
+
+    <p><b>[0x018] Size (2 bytes):</b><br>
+    The size of the file in blocks.</p>
+
+    <p><b>[0x01a] Header (2 bytes):</b><br>
+    The location of the VMS header structure within the file, relative to the
+    first FAT Entry of the file.
+    \note
+    This field is ignored for GAME-type files, which always have a hardcoded
+    VMS header offset of 1 block.</p>
+
+    <p><b>[0x01c] Reserved (4 bytes):</b><br>
+    All set to `0x00`.
+    \note
+    It is unknown whether these bytes can be used for other storage.</p>
+
+    \section fs_hidden Hidden Region
+    The hidden region is a special reserved region for storing information
+    as the regular VMU blocks of other regions slowly wear out and can no
+    longer be written to successfully. This storage redundancy is meant to
+    be a mechanism to extend the flash's lifespan.
+
+    When a block within another region is no loner viable, it is marked with
+    a value of `0xffff` within its FAT Entry, and the storage for the block
+    can be allocated from the Hidden Region.
+
+    When a block within the FAT becomes damaged, the entire FAT must be
+    relocated to the Hidden Region, as it must be stored within a
+    contiguously-allocated set of blocks.
+
+    When the entire Hidden Region becomes used, blocks at the high-end
+    of the User Region begin being used, as the total capacity of the VMU's
+    volume slowly becomes reduced.
+
+    \note
+    The Hidden Region is not supposed to be required for any particular volume,
+    and its size can be set to 0 blocks; however, this apparently causes some
+    issues with certain presumptuous commercial games which will not detect
+    the extended volume properly.
+
+    \section fs_user User Region
+    The User Region designates the area where regular user-visible files are
+    stored. Two different types of user files exist: DATA and GAME files, each
+    with different layout requirements.
+
+    \subsection fs_data Data Files
+    Data files are typically save files from Dreamcast games. Their blocks are
+    allocated from the highest to the lowest block within the User Region.
+    Their blocks do not need to be contiguous and can jump around, as the FAT
+    Entry for each block will point to its next block. There is also no limit
+    on the number of data files which can be stored within a VMU (although
+    realistically the size of the Directory and number of entries within it
+    will become a bottleneck).
+
+    \subsection fs_game Game File
+    Game files are special files which can be executed from the VMU when used
+    in standalone mode. These are typically in the form of minigames which get
+    saved from a main Dreamcast game. Only one of these files may be present
+    at a time on a single volume. Furthermore, each game file must be allocated
+    starting at block 0, growing CONTIGUOUSLY up towards the `Game Size` limit
+    set within the Root Block.
+
+    \warning
+    Since data files are stored from highest-to-lowest block and have no
+    requirement for continuity, whereas game files are stored from
+    lowest-to-highest block and must be contiguous, a scenario can easily
+    be encountered where a volume technically has enough free blocks to
+    store a game, yet these blocks are not contiguous or do not start at
+    block 0. It is imperative that any filesystem manager for such a volume
+    be able to perform a "defragmentation" operation for such a circumstance,
+    in order for game files to be written properly.
+
+*/

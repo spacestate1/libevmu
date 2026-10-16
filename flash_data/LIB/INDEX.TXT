@@ -1,0 +1,107 @@
+VM_88539.VMS|Asagiri Ayame Clock
+VM_88641.VMS|Asagiri Minami Clock
+VM_49291.VMS|Asonde Kid DC DC
+VM_08474.VMS|Atsumete Godzilla
+VM_40673.VMS|Bababa Battle
+VM_55114.VMS|Bass Rush Mini
+VM_22734.VMS|Beam Force
+VM_01895.VMS|Chao Adventure 1
+VM_96282.VMS|Chao Adventure 2
+VM_93570.VMS|Chiisana Kotori Uranai
+VM_28182.VMS|Chiisana Kotori Uranai
+VM_89908.VMS|Climax Editor #1
+VM_71239.VMS|Climax Editor #2
+VM_35583.VMS|Coji Coji Watch
+VM_24457.VMS|Collect Gachara
+VM_46953.VMS|Culdcept 2 Pocket Book
+VM_12758.VMS|Dungeon IV
+VM_13298.VMS|F San Gogo
+VM_17773.VMS|Fat Rain
+FROG.VMS|Frog in a Blender
+VM_26801.VMS|Gamera Dream Battle
+VM_67453.VMS|Giant Channel
+VM_51998.VMS|Glucky Laby
+VM_06599.VMS|Gose Satsuki Clock
+VM_77697.VMS|Heartful Catch
+VM_35656.VMS|Hello Kitty Diet Room
+VM_43086.VMS|Imuppi
+VM_39603.VMS|Jet Set Radio Graffiti DL Tool
+VM_48965.VMS|Kero Breakout
+VM_09022.VMS|Kero Oyatu
+VM_32724.VMS|Kero Tobakero
+VM_76065.VMS|Keroberos Clock
+VM_21395.VMS|Kotodamashi Encyclopedia
+VM_60443.VMS|Let's Play! VMU Trade
+VM_76703.VMS|Linear Watch
+VM_70377.VMS|Make Soccer Anywhere #1
+VM_54923.VMS|Make Soccer Anywhere #2
+VM_31771.VMS|Make Soccer Anywhere #3
+VM_19106.VMS|Manari Clock
+VM_25826.VMS|Marvel vs. Capcom 2: VS.COM
+VM_61690.VMS|Mikami Satoru Clock
+VM_45437.VMS|Mini Anima Notebook
+VM_06348.VMS|Minto To Issho
+VM_64524.VMS|Mojipuchi: Animals
+VM_48123.VMS|Mojipuchi: English
+VM_10220.VMS|Mojipuchi: Food
+VM_30902.VMS|Mojipuchi: Mixed
+VM_40269.VMS|Mojipuchi: Places
+VM_16056.VMS|Mojipuchi: Roommania
+VM_27325.VMS|Moonlighter
+VM_05852.VMS|Mothra Dream Battle
+VM_58824.VMS|Nakoruru Clock
+VM_20302.VMS|Nanwaka Lengend
+VM_40408.VMS|Narumi Rio Clock
+VM_35939.VMS|NBA 2K1 VMUv
+VM_35839.VMS|PAC-it
+VM_07179.VMS|Paper Attack
+VM_98195.VMS|Pari No Futari
+VM_19577.VMS|Pata Pies
+VM_72239.VMS|Pier Solar (Labyrinth)
+VM_16803.VMS|Pinta Quest
+VM_47299.VMS|Pixel Art - I Love Me
+VM_37539.VMS|Pocke-Kano: Fumio
+VM_38930.VMS|Pocke-Kano: Shizuka
+VM_44859.VMS|Pocke-Kano: Yumi
+VM_15951.VMS|Pocket GT America
+VM_39484.VMS|Pocket GT Europe
+VM_62410.VMS|Pocket GT Japan
+VM_72210.VMS|Pop'n Music Anywhere #1
+VM_18771.VMS|Pop'n Music Anywhere #2
+VM_48767.VMS|Pop'n Music Anywhere #3
+VM_84368.VMS|Power Stone 2 Mini Book
+VM_32435.VMS|Power Stone Mini
+VM_74611.VMS|Rera Clock
+VM_82707.VMS|Rich Life Collection
+VM_19500.VMS|Rimururu Clock
+VM_61053.VMS|Runabout Mini Madness
+VM_81942.VMS|Sakagami Hazuki Clock
+VM_87484.VMS|Sakagami Miyuki Clock
+VM_42477.VMS|Sakura Kinomoto Clock
+VM_57361.VMS|Sasagawa Asami Clock
+VM_74185.VMS|Sasagawa Sanae Clock
+VM_11227.VMS|Seaman Storage Matrix
+VM_09703.VMS|Sega Rally 2 Record Viewer
+VM_39058.VMS|Shenmue Goodies
+VM_01229.VMS|Soul Calibur Mini-Game 3 Pack
+VM_25505.VMS|Soul Calibur Text Adventure
+VM_30130.VMS|Space Senmu
+VM_55366.VMS|Speed Devils Record Viewer
+VM_12330.VMS|Stuff
+VM_65022.VMS|Swampy
+VM_59906.VMS|Syaoran Li Clock
+VM_11574.VMS|Tech Romancer Mini
+TETRIS.VMS|Tetris
+VM_80219.VMS|Tokyo Bus Guide: PDA Quiz
+VM_65759.VMS|Tomoyo Daidouji Clock
+VM_26100.VMS|Trickstyle jr. (Snake)
+VTEACHER.VMS|Virtual Teacher
+VM_87485.VMS|VM Business Card Exchange
+VM_12399.VMS|VM Business Card Exchange
+SKETCH13.VMS|VM-A-Sketch v1.3
+SKETCH14.VMS|VM-A-Sketch v1.4
+VM_17333.VMS|VM-Chan 1
+VM_71268.VMS|VM-Chan 2
+VM_99559.VMS|VMU Football
+VM_52790.VMS|Yogurt's Big Adventure
+VM_06399.VMS|Zombie Raising

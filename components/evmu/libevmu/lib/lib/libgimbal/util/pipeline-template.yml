@@ -1,0 +1,568 @@
+############## CONFIGURATION ####################
+
+stages:
+  - build
+  - test
+  - deploy
+
+# GLOBAL project-level configuration settings (defaults)
+variables:
+  BINARY_NAME: ""
+  BUILD_DIR: build
+  BUILD_TYPE: Release
+  ARTIFACT_DIR: "artifacts"
+  PROJECT_CMAKE_ARGS: ""
+  BUILD_TARGET: all
+  BUILD_CONFIG: ${BUILD_TYPE}
+  DOCS_FTP_PARALLEL_JOBS: 10
+  DOCS_DIR: "doc"
+  DOCS_PREREQ_DIRS: ""
+  BINARY_PATH: ""
+  BINARY_EXTENSION: ""
+  ARTIFACT_EXTENSIONS: ""
+  DC_BOOT_SLEEP_TIME: 30
+
+############## BUILDS ####################
+
+# Bottom-level Generic CMake build job
+.build_cmake:
+  stage: build
+  variables:
+    GIT_SUBMODULE_STRATEGY: recursive
+    CMAKE_CONFIGURE: cmake
+    CMAKE_BUILD: ${CMAKE_CONFIGURE}
+    GENERATOR: Ninja
+    TOOLCHAIN_FILE: ""  
+    EXTRA_GENERATOR_ARGS: ""
+    DEPLOY_CMD: echo
+  script:
+    - set -x #echo on
+    - mkdir -p ${BUILD_DIR}
+    - cd ${BUILD_DIR}
+    - CC=${CC} CXX=${CXX} ${CMAKE_CONFIGURE} ../ -DCMAKE_PREFIX_PATH=${PREFIX_PATH}
+      -DCMAKE_TOOLCHAIN_FILE=${TOOLCHAIN_FILE} -DCMAKE_BUILD_TYPE:String=${BUILD_TYPE} 
+      -G"${GENERATOR}" ${EXTRA_CMAKE_ARGS} ${PROJECT_CMAKE_ARGS}
+    - ${ANALYZER} ${CMAKE_BUILD} --build . --target ${BUILD_TARGET} --config ${BUILD_CONFIG} 
+      -- ${EXTRA_GENERATOR_ARGS}
+  after_script:
+    - mkdir -p ${BUILD_DIR}/${ARTIFACT_DIR}
+    - cp ${BUILD_DIR}/${BINARY_PATH}/${BINARY_NAME}${BINARY_EXTENSION} 
+      ${BUILD_DIR}/${ARTIFACT_DIR}/${BINARY_NAME}${BINARY_EXTENSION}
+    - |
+      for EXT in ${ARTIFACT_EXTENSIONS}
+      do
+        cp ${BUILD_DIR}/${BINARY_PATH}/${BINARY_NAME}${EXT} ${BUILD_DIR}/${ARTIFACT_DIR}/${BINARY_NAME}${EXT}
+      done
+    - ${DEPLOY_CMD} ${BUILD_DIR}/${ARTIFACT_DIR}/${BINARY_NAME}${BINARY_EXTENSION}  
+  artifacts:
+    paths:
+       - ${BUILD_DIR}/${ARTIFACT_DIR}
+    expire_in: 1 week
+
+# Base Debian linux build job
+.build_debian:
+  extends: .build_cmake
+  variables:
+    PREFIX_PATH: ${QT_PATH}/gcc_64
+  tags:
+    - linux
+
+build debian-gcc:
+  extends: .build_debian
+  except:
+    variables:
+      - $BUILD_DEBIAN_GCC_DISABLED
+  tags:
+    - debian, gcc
+  variables:
+    CC: gcc
+    CXX: g++
+    
+build debian-clang:
+  extends: .build_debian
+  except:
+    variables:
+      - $BUILD_DEBIAN_CLANG_DISABLED
+  tags: 
+    - debian, clang
+  variables:
+    CC: clang
+    CXX: clang++
+
+# Base Windows build job
+.build_win:
+  extends: .build_cmake
+  variables:
+    DEPLOY_CMD: ${PREFIX_PATH}/bin/windeployqt
+    BINARY_EXTENSION: .exe
+  tags:
+    - win
+
+build win-msvc:
+  extends: .build_win
+  except:
+    variables:
+      - $BUILD_WIN_MSVC_DISABLED
+  tags:
+    - win, msvc
+  variables:   
+    CC: cl
+    CXX: cl
+    PREFIX_PATH: ${QT_PATH}/msvc2019_64
+
+build win-mingw:
+  extends: .build_win
+  except:
+    variables:
+      - $BUILD_WIN_MINGW_DISABLED
+  tags:
+    - win, mingw
+  variables:
+    CC: x86_64-w64-mingw32-gcc
+    CXX: x86_64-w64-mingw32-g++
+    PREFIX_PATH: ${QT_PATH}/mingw_64
+
+# Base MacOS build job
+.build_macos:
+  extends: .build_cmake
+  variables:
+    PREFIX_PATH: ${QT_PATH}/macos
+    DEPLOY_CMD: ${PREFIX_PATH}/bin/macdeployqt
+  tags:
+    - macos
+
+build macos-clang:
+  extends: .build_macos
+  except:
+    variables:
+      - $BUILD_MACOS_CLANG_DISABLED
+  tags:
+    - macos, clang
+  variables:
+    CC: clang
+    CXX: clang++
+
+build macos-gcc:
+  extends: .build_macos
+  except:
+    variables:
+      - $BUILD_MACOS_GCC_DISABLED
+  tags:
+    - macos, gcc
+  variables:
+    CC: gcc-14
+    CXX: g++-14
+
+# Top-Level Dreamcast build job
+build dreamcast:
+  extends: .build_cmake
+  except:
+    variables:
+      - $BUILD_DREAMCAST_DISABLED
+  variables:
+    TOOLCHAIN_FILE: ${KOS_BASE}/utils/cmake/kallistios.toolchain.cmake
+    GENERATOR: "Unix Makefiles"
+    EXTRA_GENERATOR_ARGS: -j32 
+    BINARY_EXTENSION: .elf
+  before_script:
+    - source ${KOS_BASE}/../environ.sh
+  tags: 
+    - dreamcast
+
+# Top-level PSP build job
+build psp:
+  extends: .build_cmake
+  except:
+    variables:
+      - $BUILD_PSP_DISABLED
+  variables:
+    BINARY_NAME: EBOOT
+    BINARY_EXTENSION: .PBP
+    TOOLCHAIN_FILE: ${PSPDEV}/psp/share/pspdev.cmake
+    GENERATOR: "Unix Makefiles"
+    EXTRA_GENERATOR_ARGS: -j32
+  tags: 
+    - psp, pspsdk
+
+# Top-level PSVita build job
+build psvita:
+  extends: .build_cmake
+  except:
+    variables:
+      - $BUILD_PSVITA_DISABLED
+  variables:
+    TOOLCHAIN_FILE: ${VITASDK}/share/vita.toolchain.cmake
+    GENERATOR: "Unix Makefiles"
+    EXTRA_GENERATOR_ARGS: -j32
+  tags: 
+    - psvita, vitasdk
+
+# Top-level Android Simulator build job
+build android-sim:
+  extends: .build_cmake
+  except:
+    variables:
+      - $BUILD_ANDROID_SIM_DISABLED
+  variables:
+    CC: ${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang
+    CXX: ${ANDROID_NDK}/toolchains/llvm/prebuilt/linux-x86_64/bin/clang++
+    BINARY_EXTENSION: .apk
+    TOOLCHAIN_FILE: ${ANDROID_NDK}/build/cmake/android.toolchain.cmake
+    PREFIX_PATH: ${QT_PATH}/android_x86_64
+    CMAKE_CONFIGURE: ${PREFIX_PATH}/../../Tools/CMake/bin/cmake 
+    CMAKE_BUILD: cmake
+    EXTRA_CMAKE_ARGS: >
+      -DCMAKE_FIND_ROOT_PATH=${PREFIX_PATH}
+      -DQT_HOST_PATH=${QT_PATH}/gcc_64
+      -DANDROID_PLATFORM=android-33
+      -DANDROID_NDK=${ANDROID_NDK}
+      -DANDROID_ABI=x86_64
+      -DANDROID_STL=c++_shared  
+      -DANDROID_SDK_ROOT=${ANDROID_SDK}
+      -DQT_NO_GLOBAL_APK_TARGET_PART_OF_ALL=ON
+  after_script: >
+    ${QT_PATH}/gcc_64/bin/androiddeployqt 
+    --verbose 
+    --output ${BUILD_DIR}/${BINARY_PATH}/android-build 
+    --android-platform=android-33 
+    --input ${BUILD_DIR}/${BINARY_PATH}/android-${BINARY_NAME}-deployment-settings.json
+    --jdk ${JDK}
+    --gradle
+    --release 
+    --sign
+  tags: 
+    - android, ndk
+  artifacts:
+    paths:
+       - ${BUILD_DIR}
+    expire_in: 1 week
+
+# Top-level iOS Simulator build job
+build ios-sim:
+  extends: .build_cmake
+  except:
+    variables:
+      - $BUILD_IOS_SIM_DISABLED
+  variables:
+    PREFIX_PATH: ${QT_PATH}/ios
+    CMAKE_CONFIGURE: ${PREFIX_PATH}/bin/qt-cmake
+    CMAKE_BUILD: ${PREFIX_PATH}/../../Tools/CMake/CMake.app/Contents/bin/cmake
+    GENERATOR: Xcode
+    BUILD_TARGET: ALL_BUILD
+    BINARY_EXTENSION: .app
+    EXTRA_CMAKE_ARGS: >
+      -DQT_QMAKE_EXECUTABLE:FILEPATH=${PREFIX_PATH}/bin/qmake 
+      -DCMAKE_OSX_ARCHITECTURES=x86_64 
+      -DCMAKE_OSX_SYSROOT=iphonesimulator 
+      -DCMAKE_GENERATOR:STRING=Xcode 
+      -DCMAKE_C_COMPILER:FILEPATH=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang 
+      -DCMAKE_CXX_COMPILER:FILEPATH=/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++   
+      -DCMAKE_TOOLCHAIN_FILE:FILEPATH=${PREFIX_PATH}/lib/cmake/Qt6/qt.toolchain.cmake
+      -DCMAKE_CXX_FLAGS=-std=c++20
+  tags: 
+    - ios, simulator
+  artifacts:
+    paths:
+       - ${BUILD_DIR}
+    expire_in: 1 week
+
+# Top-level WebASM build job
+build webasm:
+  extends: .build_cmake
+  except:
+    variables:
+      - $BUILD_WEBASM_DISABLED
+  variables:
+    BINARY_EXTENSION: .js
+    ARTIFACT_EXTENSIONS: >
+      .wasm
+      .worker.js
+    PREFIX_PATH: ${QT_PATH}/wasm_multithread
+    CC: ${EMSDK}/upstream/emscriptgen/emcc
+    CXX: ${EMSDK}/upstream/emscriptgen/em++
+    TOOLCHAIN_FILE: ${PREFIX_PATH}/lib/cmake/Qt6/qt.toolchain.cmake
+    EXTRA_CMAKE_ARGS: >
+      '-DCMAKE_PROJECT_INCLUDE_BEFORE:FILEPATH=${PREFIX_PATH}/../Tools/Qt Creator/share/qtcreator/package-manager/auto-setup.cmake' 
+      -DQT_QMAKE_EXECUTABLE:FILEPATH=${PREFIX_PATH}/bin/qmake
+  before_script:
+    - source ${EMSDK}/emsdk_env.sh
+  tags: 
+    - webasm
+
+############## TESTS ####################
+
+.test_common:
+  stage: test
+  script:
+    - ${BUILD_DIR}/${ARTIFACT_DIR}/${BINARY_NAME}${BINARY_EXTENSION}
+
+test android-sim:
+  stage: test 
+  needs: ["build android-sim"]
+  dependencies:
+    - build android-sim 
+  only:
+    variables:
+      - $ANDROID_SIM_DEVICE_ID
+      - $BUILD_ANDROID_SIM_DISABLED == null
+  except:
+    variables:
+      - $TEST_ANDROID_SIM_DISABLED  
+  variables:
+    BINARY_EXTENSION: .apk
+  tags:
+    - android, simulator
+  script:
+    - set -x #echo on
+    - exec > >(tee -a "${BUILD_DIR}/results.txt" )
+    - exec 2> >(tee -a "${BUILD_DIR}/results.txt" >&2)
+    - ${ANDROID_SDK}/platform-tools/adb devices | grep emulator | cut -f1 | while read line; do ${ANDROID_SDK}/platform-tools/adb -s $line emu kill; done || true
+#   - ${ANDROID_SDK}/platform-tools/adb kill-server || true
+    - nohup ${ANDROID_SDK}/emulator/emulator -avd Pixel_3a_API_33_x86_64 -no-window || true </dev/null &
+#   - ${ANDROID_SDK}/paltform-tools/adb start-server || true
+    - sleep 30
+    - ${ANDROID_SDK}/platform-tools/adb install ${BUILD_DIR}/${BINARY_PATH}/android-build/build/outputs/apk/release/android-build-release-signed.apk
+    - nohup ${ANDROID_SDK}/platform-tools/adb shell logcat -b main </dev/null &
+    - ${ANDROID_SDK}/platform-tools/adb shell am start -a android.intent.acton.MAIN -n org.qtproject.example.${BINARY_NAME}/org.qtproject.qt.android.bindings.QtActivity
+    - ${ANDROID_SDK}/platform-tools/adb devices | grep emulator | cut -f1 | while read line; do ${ANDROID_SDK}/platform-tools/adb -s $line emu kill; done
+    - ${ANDROID_SDK}/platform-tools/adb kill-server
+  timeout: 2m
+
+test ios-sim:
+  stage: test 
+  needs: ["build ios-sim"]
+  dependencies:
+    - build ios-sim 
+  only:
+    variables:
+      - $IOS_SIM_DEVICE_ID
+      - $BUILD_IOS_SIM_DISABLED == null
+  except:
+    variables:
+      - $TEST_IOS_SIM_DISABLED  
+  variables:
+    BINARY_EXTENSION: .app
+  tags:
+    - ios, simulator
+  script:
+    - set -x #echo on
+    - xcrun simctl shutdown ${IOS_SIM_DEVICE_ID} || true 
+    - xcrun simctl boot ${IOS_SIM_DEVICE_ID} 2>&1
+    - xcrun simctl install ${IOS_SIM_DEVICE_ID} ${BUILD_DIR}/${BINARY_PATH}/${BUILD_TYPE}-iphonesimulator/${BINARY_NAME}${BINARY_EXTENSION}
+    - xcrun simctl launch --console ${IOS_SIM_DEVICE_ID} ${BINARY_NAME}
+    - xcrun simctl shutdown ${IOS_SIM_DEVICE_ID} 2>&1
+
+test webasm:
+  stage: test
+  needs: ["build webasm"]
+  dependencies:
+    - build webasm
+  only:
+    variables:
+      - $BUILD_WEBASM_DISABLED == null
+  except:
+    variables:
+      - $TEST_WEBASM_DISABLED
+  tags:
+    - webasm
+  script:
+    - node ${BUILD_DIR}/${ARTIFACT_DIR}/${BINARY_NAME}.js
+
+test dreamcast-emu:
+  stage: test 
+  needs: ["build dreamcast"]
+  dependencies:
+    - build dreamcast 
+  only:
+    variables:
+      - $BUILD_DREAMCAST_DISABLED == null
+  except:
+    variables:
+      - $TEST_DREAMCAST_EMU_DISABLED    
+  variables:
+    BINARY_EXTENSION: .elf
+  tags:
+    - dreamcast
+  script:
+    - exec > >(tee -a "${BUILD_DIR}/results.txt" )
+    - exec 2> >(tee -a "${BUILD_DIR}/results.txt" >&2)
+    - lxdream-nitro -H -d -e ${BUILD_DIR}/${ARTIFACT_DIR}/${BINARY_NAME}${BINARY_EXTENSION}
+    - cp ${BUILD_DIR}/results.txt ${BUILD_DIR}/results2.txt
+    - grep "********************* [   PASS   ] *********************" ${BUILD_DIR}/results2.txt
+
+test dreamcast-physical:
+  stage: test 
+  needs: ["build dreamcast"]
+  dependencies:
+    - build dreamcast 
+  only:
+    variables:
+      - $BUILD_DREAMCAST_DISABLED == null
+      - $DC_BBA_IP_ADDR
+      - $DC_OUTLET_IP_ADDR
+  except:
+    variables:
+      - $TEST_DREAMCAST_PHYSICAL_DISABLED   
+  variables:
+    BINARY_EXTENSION: .elf
+  tags:
+    - dreamcast
+  before_script:
+    - killall dc-tool-ip || true
+    - hs100.sh -i ${DC_OUTLET_IP_ADDR} off
+  script:
+    - exec > >(tee -a "${BUILD_DIR}/results.txt" )
+    - exec 2> >(tee -a "${BUILD_DIR}/results.txt" >&2)
+    - hs100.sh -i ${DC_OUTLET_IP_ADDR} on 
+    - sleep ${DC_BOOT_SLEEP_TIME}
+    - dc-tool-ip -t ${DC_BBA_IP_ADDR} -x ${BUILD_DIR}/${ARTIFACT_DIR}/${BINARY_NAME}${BINARY_EXTENSION} 
+    - hs100.sh -i ${DC_OUTLET_IP_ADDR} off
+    - cp ${BUILD_DIR}/results.txt ${BUILD_DIR}/results2.txt
+    - grep "********************* [   PASS   ] *********************" ${BUILD_DIR}/results2.txt
+  after_script:
+    - killall dc-tool-ip || true
+    - hs100.sh -i ${DC_OUTLET_IP_ADDR} off
+  timeout: 5m
+  retry:
+    max: 2
+    when: job_execution_timeout
+
+test psp:
+  stage: test 
+  needs: ["build psp"]
+  dependencies:
+    - build psp 
+  only:
+    variables:
+      - $BUILD_PSP_DISABLED == null
+  except:
+    variables:
+      - $TEST_PSP_DISABLED   
+  variables:
+    BINARY_EXTENSION: .PBP
+    BINARY_NAME: EBOOT
+  tags:
+    - psp
+  before_script:
+    - pkill -9 Xvfb || true
+  script:
+    - exec > >(tee -a "${BUILD_DIR}/results.txt" )
+    - exec 2> >(tee -a "${BUILD_DIR}/results.txt" >&2)
+    - nohup xvfb-run ppsspp -v ${BUILD_DIR}/${ARTIFACT_DIR}/${BINARY_NAME}${BINARY_EXTENSION} || true </dev/null &
+    - sleep 50
+    - cp ${BUILD_DIR}/results.txt ${BUILD_DIR}/results2.txt
+    - grep "********************* [   PASS   ] *********************" ${BUILD_DIR}/results2.txt
+    - pkill -9 Xvfb || true
+  timeout: 2m
+
+test debian-gcc:
+  extends: .test_common
+  needs: ["build debian-gcc"]
+  dependencies:
+    - build debian-gcc
+  only:
+    variables:
+      - $BUILD_DEBIAN_GCC_DISABLED == null
+  except:
+    variables:
+      - $TEST_DEBIAN_GCC_DISABLED    
+  tags:
+    - linux, gcc
+    
+test debian-clang:
+  extends: .test_common
+  needs: ["build debian-clang"]
+  dependencies:
+    - build debian-clang
+  only:
+    variables:
+      - $BUILD_DEBIAN_CLANG_DISABLED == null
+  except:
+    variables:
+      - $TEST_DEBIAN_CLANG_DISABLED    
+  tags:
+    - linux, clang
+
+test win-msvc:
+  extends: .test_common
+  needs: ["build win-msvc"]
+  dependencies:
+    - build win-msvc
+  only:
+    variables:
+      - $BUILD_WIN_MSVC_DISABLED == null
+  except:
+    variables:
+      - $TEST_WIN_MSVC_EMU_DISABLED    
+  tags:
+    - win10, visual-studio
+
+test win-mingw:
+  extends: .test_common
+  needs: ["build win-mingw"]
+  dependencies:
+    - build win-mingw
+  only:
+    variables:
+      - $BUILD_WIN_MINGW_DISABLED == null
+  except:
+    variables:
+      - $TEST_WIN_MINGW_DISABLED    
+  tags:
+    - win10, mingw
+
+test macos-clang:
+  extends: .test_common
+  needs: ["build macos-clang"]
+  dependencies:
+    - build macos-clang
+  only:
+    variables:
+      - $BUILD_MACOS_CLANG_DISABLED == null
+  except:
+    variables:
+      - $TEST_MACOS_CLANG_DISABLED    
+  tags:
+    - macos, clang
+
+test macos-gcc:
+  extends: .test_common
+  needs: ["build macos-gcc"]
+  dependencies:
+    - build macos-gcc
+  only:
+    variables:
+      - $BUILD_MACOS_GCC_DISABLED == null
+  except:
+    variables:
+      - $TEST_MACOS_GCC_DISABLED    
+  tags:
+    - macos, gcc
+
+publish-docs:
+  stage: deploy
+  dependencies: []
+  needs: []
+  tags:
+    - doxygen
+  only:
+    variables:
+      - $DOCS_FTP_ADDRESS
+  script:
+  - cwd=$(pwd)
+  - |
+    for d in ${DOCS_PREREQ_DIRS}
+    do 
+      cd "$d" 
+      doxygen 
+      cd "$cwd" 
+    done
+  - cd "$cwd"
+  - cd ${DOCS_DIR}
+  - doxygen
+  - cd html
+  - lftp -c "set ssl:verify-certificate false;
+    open ${DOCS_FTP_ADDRESS}; 
+    login $FTP_USER $FTP_PASS; 
+    mirror -X *. --reverse --verbose --parallel=${DOCS_FTP_PARALLEL_JOBS} ./ ./; 
+    bye"

@@ -1,0 +1,17 @@
+include:
+  - remote: https://raw.githubusercontent.com/gyrovorbis/libgimbal/master/util/pipeline-template.yml
+
+variables:
+  BINARY_PATH: test
+  BINARY_NAME: ElysianVmuTests
+  PROJECT_CMAKE_ARGS: -DEVMU_ENABLE_TESTS=ON
+  BUILD_WIN_MSVC_DISABLED: "YES"
+  RUN_ANDROID_SIM_DISABLED: "YES"
+  DOCS_FTP_ADDRESS: vmu.elysianshadows.com
+  DOCS_PREREQ_DIRS: "lib/lib/libgimbal/doc"
+  TEST_DREAMCAST_EMU_DISABLED: "YES"
+  TEST_DREAMCAST_PHYSICAL_DISABLED: "YES"
+  TEST_ANDROID_SIM_DISABLED: "YES"
+  #BUILD_IOS_SIM_DISABLED: "YES"
+  #BUILD_PSVITA_DISABLED: "YES"
+  #BUILD_WEBASM_DISABLED: "YES"

@@ -1,0 +1,14 @@
+*.DS_Store
+CMakeLists.txt.user
+CMakeLists.txt.user.*
+*.pro.user
+*.o
+*.exe
+*.autosave
+build/
+build_*
+build-*
+.cache/
+doc/html/
+doc/latex/
+doc/xml/

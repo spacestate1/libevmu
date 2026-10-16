@@ -1,0 +1,1345 @@
+/*! \page xram XRAM
+    \brief LCD Framebuffer pixel + icon format
+
+    \tableofcontents
+
+    XRAM a special region of memory at the end of the RAM address space which is divided into three banks. Two XRAM banks combine to serve as the framebuffer for the screen, while the third bank drives the 4 icons at the bottom of the screen.
+
+    \section xram_banks0_1 Banks 0-1: Framebuffer
+    The first two XRAM banks represent the framebuffer. It is stored from top-to-bottom order, with each 48 pixel row being a sequence of 6 bytes. Each pixel is a single bit moving from left-to-right in the order of MSB to LSB. There are two important things to note about its layout:
+        - It's banked: so the top half of the screen uses bank 0 while the bottom half uses bank 1 of the same 0x180-0x1FB address range.
+        - It's disjoint: data are only stored consecutively for two rows at a time, then a 4 byte skip occurs in the address range before continuing on to the next two rows.
+
+    The following table shows the byte addresses corresponding to each each 1x8 pixel region of the display.
+
+    |Row/Col |0-7|8-15|16-23|24-31|32-39|40-47|
+    |--------|---|----|-----|-----|-----|-----|
+    |0, 16   |180|181 |182  |183  |184  |185  |
+    |1, 17   |186|187 |188  |189  |18A  |18B  |
+    |<center>Skip 4 Bytes</center>|||||||
+    |2, 18   |190|191 |192  |193  |194  |195  |
+    |3, 19   |196|197 |198  |199  |19A  |19B  |
+    |<center>Skip 4 Bytes</center>|||||||
+    |4, 20   |1A0|1A1 |1A2  |1A3  |1A4  |1A5  |
+    |5, 21   |1A6|1A7 |1A8  |1A9  |1AA  |1AB  |
+    |<center>Skip 4 Bytes</center>|||||||
+    |6, 22   |1B0|1B1 |1B2  |1B3  |1B4  |1B5  |
+    |7, 23   |1B6|1B7 |1B8  |1B9  |1BA  |1BB  |
+    |<center>Skip 4 Bytes</center>|||||||
+    |8, 24   |1C0|1C1 |1C2  |1C3  |1C4  |1C5  |
+    |9, 25   |1C6|1C7 |1C8  |1C9  |1CA  |1CB  |
+    |<center>Skip 4 Bytes</center>|||||||
+    |10, 26  |1D0|1D1 |1D2  |1D3  |1D4  |1D5  |
+    |11, 27  |1D6|1D7 |1D8  |1D9  |1DA  |1DB  |
+    |<center>Skip 4 Bytes</center>|||||||
+    |12, 28  |1E0|1E1 |1E2  |1E3  |1E4  |1E5  |
+    |13, 29  |1E6|1E7 |1E8  |1E9  |1EA  |1EB  |
+    |<center>Skip 4 Bytes</center>|||||||
+    |14, 30  |1F0|1F1 |1F2  |1F3  |1F4  |1F5  |
+    |15, 31  |1F6|1F7 |1F8  |1F9  |1FA  |1FB  |
+
+    \note
+    Since the top and bottom halves of the screen share the same address range, using different banks, the same address can refer to two different rows, offset by 16.
+
+    \section xram_bank2 Bank 2: Icons
+    Bank 2 of XRAM is used to drive the icons at the bottom of the screen. Again, we have a disjoint layout, where, starting at bit 6 of address 0x181, each icon is assigned two bits lower of the next byte.
+
+    |     |7|6   |5|4   |3|2    |1|0    |
+    |-----|-|----|-|----|-|-----|-|-----|
+    |0x181| |FILE| |    | |     | |     |
+    |0x182| |    | |GAME| |     | |     |
+    |0x183| |    | |    | |CLOCK| |     |
+    |0x184| |    | |    | |     | |FLASH|
+
+    \section XRAM Holes and Extra RAM
+    The 4-byte skips don't seem to decode RAM, writes are not effective and reads return 0xFF, this pattern persists across all of the framebuffer regions and also in the icon bank. Additionally, there are 32 bytes of icon RAM, of which 4 are used to display the icons you normally see and the remaining 28 are unused RAM that you can freely read from and write to.
+
+	The icon RAM bytes are distributed around Bank 2 in this order
+    |Row/Col |0-7|8-15|16-23|24-31|32-39|40-47|
+    |--------|---|----|-----|-----|-----|-----|
+    |0, 16   |180|181 |182  |183  |184  |185  |
+    |1, 17   |186|187 |188  |189  |18A  |18B  |
+    |<center>Skip 4 Bytes</center>|||||||
+    |2, 18   |190|191 |192  |193  |194  |195  |
+    |3, 19   |196|197 |198  |199  |19A  |19B  |
+    |<center>Skip 4 Bytes</center>|||||||
+    |4, 20   |1A0|1A1 |1A2  |1A3  |||
+    |<center>Skip 12 Bytes</center>|||||||
+    |6, 22   |1B0|1B1 |1B2  |1B3  |||
+    |<center>The remaining bytes are empty</center>|||||||
+
+*/
+
+/*! \page memory_map Memory Map
+    \brief Map of the VMU's various memory spaces
+
+    \tableofcontents
+
+    The VMU is a strange beast with multiple disjoint address spaces for data, instructions, and more. Understanding
+    the various segments of the memory map and their layout is required to master the VMU's architecture from a
+    software perspective.
+
+\section data_space RAM Memory Space
+The following table shows the various segments and banks of the main RAM or the internal data address space.
+This address space is the target of regular data transfer instructions, unless otherwise specified. Spanning
+the memory space is XRAM, SFRs, and RAM. XRAM has 3 banks of 64, 64, and 16 bytes respectively. The SFR range
+spans 143 bytes. Main system memory is broken into two banks of 256 bytes each. Bank 0 contains the stack and
+is reserved for use by the BIOS and OS routines exclusively. Bank 1 is where the user's generic application
+memory resides.
+|Address|Bank 0                                         |Bank 1                          |Bank 2      |
+|-------|:---------------------------------------------:|:------------------------------:|:----------:|
+|1F0-1FF|\link xram_banks0_1 XRAM - Upper Half of Framebuffer \endlink|\link xram_banks0_1 XRAM - Lower Half of Framebuffer \endlink|UNUSED      |
+|1E0-1EF|^                                              |^                               |^           |
+|1D0-1DF|^                                              |^                               |^           |
+|1C0-1CF|^                                              |^                               |^           |
+|1B0-1BF|^                                              |^                               |^           |
+|1A0-1AF|^                                              |^                               |^           |
+|190-19F|^                                              |^                               |^           |
+|180-18F|^                                              |^                               |\link xram_bank2 XRAM - Icons \endlink|
+|170-17F|\link sfrs Special Function Registers \endlink |UNUSED                          |UNUSED      |
+|160-16F|^                                              |^                               |^           |
+|150-15F|^                                              |^                               |^           |
+|140-14F|^                                              |^                               |^           |
+|130-13F|^                                              |^                               |^           |
+|120-12F|^                                              |^                               |^           |
+|110-11F|^                                              |^                               |^           |
+|100-10F|^                                              |^                               |^           |
+|0F0-0FF|Stack Area                                     |Application/User RAM            |^           |
+|0E0-0EF|^                                              |^                               |^           |
+|0D0-0DF|^                                              |^                               |^           |
+|0C0-0CF|^                                              |^                               |^           |
+|0B0-0BF|^                                              |^                               |^           |
+|0A0-0AF|^                                              |^                               |^           |
+|090-09F|^                                              |^                               |^           |
+|080-08F|^                                              |^                               |^           |
+|070-07F|\link system_variables System/BIOS RAM \endlink|^                               |^           |
+|060-06F|^                                              |^                               |^           |
+|050-05F|^                                              |^                               |^           |
+|040-04F|^                                              |^                               |^           |
+|030-03F|^                                              |^                               |^           |
+|020-02F|^                                              |^                               |^           |
+|010-01F|^                                              |^                               |^           |
+|000-00F|^                                              |^                               |^           |
+
+\section instruction_space ROM Memory Space
+Due to the fact that the VMU can execute either directly from the BIOS, residing on a built-in ROM chip,
+or from a GAME user application residing in flash, the device treats the instruction space as a generic
+memory space, which can swap between sourcing instructions between ROM and flash depending on the CPU state.
+ROM is a single chip spanning 64KB of space, while flash is 2 banks of 64KB each.
+
+|Address  |ROM                  |Flash (Bank 0)        |Flash (Bank 1)
+|---------|---------------------|----------------------|------------------------
+|F0FF-FFFF|UNUSED               |For GAME/DATA Use     |For DATA Use Only
+|E000-EFFF|OS Program Area      |^                     |^
+|4000-DFFF|Reserved Area        |^                     |^
+|0000-3FFF|System Program Area  |^                     |^
+
+\section wram Work RAM
+Work RAM is an additional, separate memory space from main RAM. It offers the VMU an additional 512 bytes which
+can be utilized as more general-purpose storage when in standalone mode. While connected to a Dreamcast, this
+storage functions as a Maple TX/RX packet buffer for the Maple communications stack. WRAM is accessed one byte
+at a time, with a target address given by the two VRMAD SFRs ([VRMAD1](sfrs.html#vrmad1) and [VRMAD2](sfrs.html#vrmad2)) and read/writes being issued via accessing the
+[VTRBF](sfrs.html#vtrbf) SFR.
+
+|Address|Description                     |
+|-------|--------------------------------|
+|1FF    |512 Bytes Additional Work RAM   |
+|...    |^                               |
+|000    |^                               |
+
+\note
+Interestingly, the contents of WRAM will persist even when the user changes MODEs to the BIOS and back
+to GAME. Apparently the BIOS does not use WRAM. Unfortunately, the minute the VMU is plugged into a
+Dreamcast controller, WRAM will be overwritten by incoming and outgoing Maple packets, though.
+
+*/
+
+/*!
+\page bios BIOS
+\brief Built-in OS and Firmware located within ROM
+
+\tableofcontents
+
+\section firmware_subroutines Firmware Subroutines
+The VMU BIOS contains a series of built-in subroutines, which are exposed as public ROM entry-points which the user application may invoke to perform various system-related tasks.
+
+To call one of these subroutines, use a `NOT1 EXT, 0` instruction followed IMMEDIATELY by a `JMPF` instruction to the entry address. This swaps the CPU from executing out of flash to executing out of ROM and continues execution at the proper routine. Each routine has an advertised exit address where it will return control back to the user-application at a fixed address, as well as fixed input/output variables which will be passed through RAM bank 1.
+
+\subsection subr_flash_write Flash Memory Write
+Writes a single contiguous page of data (128 bytes) to Flash, starting at the specified address.
+
+<b>Entry Address</b><br>`ORG 0x100`
+
+<b>Arguments</b>
+|Address  |Name      |Function                   |
+|---------|----------|---------------------------|
+|0x7D     |fmadd_bank|Flash Bank (must be  0)    |
+|0x7E     |fmadd_h   |Starting address upper byte|
+|0x7F     |fmadd_l   |Starting address lower byte|
+|0x80-0xFF|input data|Data to be written to flash|
+
+\warning
+The `fmadd` address must be 128-byte page-aligned (bits 0-6 of the lower address reset to 0). Only a single full page can be written to at a time.
+
+\warning
+The routine requires flash bank be set to 0 or "normal operation is not assured."
+
+\warning
+Make sure to call the routine with \link stad STAD \endlink set to 0x00, or part of the screen will be overwritten.
+
+<b>Return Values</b>
+|\link acc ACC \endlink Value|Meaning     |
+|----------------------------|------------|
+|0x0                         |Normal end  |
+|0xFF                        |Abnormal end|
+
+<b>Clobbered Registers</b>
+    - \link acc ACC \endlink
+    - \link b B \endlink
+    - \link c C \endlink
+    - \link trl TRL \endlink
+    - \link trh TRH \endlink
+
+\subsection subr_flash_verify Flash Memory Verify
+
+Compares 128 bytes of data, starting at address 0x80 and ending at 0xFF to the data actually written to flash memory, performing a verification check. The same alignment requirements and warnings as with \link subr_flash_write Flash Memory Write \endlink apply here.
+
+<b>Entry Address</b><br>`ORG 0x110`
+
+<b>Arguments</b>
+|Address  |Name      |Function                   |
+|---------|----------|---------------------------|
+|0x7D     |fmadd_bank|Flash Bank (must be  0)    |
+|0x7E     |fmadd_h   |Starting address upper byte|
+|0x7F     |fmadd_l   |Starting address lower byte|
+|0x80-0xFF|input data|Data to be written to flash|
+
+
+<b>Return Values</b>
+|\link acc ACC \endlink Value|Meaning                        |
+|----------------------------|-------------------------------|
+|0x0                         |No data mismatch               |
+|0x1-0xFF                    |Data mismatch (any other value)|
+
+<b>Clobbered Registers</b>
+    - \link acc ACC \endlink
+    - \link trl TRL \endlink
+    - \link trh TRH \endlink
+
+\subsection subr_flash_read Flash Memory Read
+Reads a single contiguous page of data (128 bytes) from Flash, starting at the specified address.
+
+<b>Entry Address</b><br>`ORG 0x120`
+
+<b>Arguments</b>
+
+|Address|Name      |Function                   |
+|-------|----------|---------------------------|
+|0x7D   |fmadd_bank|Flash Bank (must be  0)    |
+|0x7E   |fmadd_h   |Starting address upper byte|
+|0x7F   |fmadd_l   |Starting address lower byte|
+
+\warning
+The `fmadd` address must be 128-byte page-aligned (bits 0-6 of the lower address reset to 0). Only a single full page can be read from at a time.
+
+\warning
+The routine requires flash bank be set to 0 or "normal operation is not assured."
+
+<b>Return Values</b><br>
+Read data (128 bytes): 0x80H to 0x0FF
+
+<b>Clobbered Registers</b>
+    - \link acc ACC \endlink
+    - \link trl TRL \endlink
+    - \link trh TRH \endlink
+
+\warning
+This routine does not return any sort of error upon receiving invalid arguments, so there is no feedback if they are specified incorrectly. Make sure to call the routine with \link stad STAD \endlink set to 0x00, or part of the screen will be overwritten.
+
+\subsection subr_clock Clock Update
+<b>Entry Address</b><br>`ORG 0x130`
+
+<b>Arguments</b>
+None
+
+<b>Return Values</b>
+All values returned are stored in bank 0.
+|Address  |Name   |Description |
+|---------|-------|------------|
+|0x17-0x18|year_h |Year (hex)  |
+|0x19     |month_h|Month (hex) |
+|0x1A     |day_h  |Day (hex)   |
+|0x1B     |hour_h |Hour (hex)  |
+|0x1C     |min_h  |Minute (hex)|
+|0x1D     |sec_h  |Second (hex)|
+
+<b>Clobbered Registers</b>
+
+\subsection subr_mode Mode Change
+Yields control back to the BIOS, which changes modes (to clock mode) when the MODE button is pressed.
+
+<b>Entry Address</b><br>`ORG 0x1f0`
+
+<b>Arguments</b>
+None
+
+<b>Return Values</b>
+None
+
+<b>Clobbered Registers</b>
+N/A
+
+\section system_variables System Variables
+
+The following is a listing of all known system variables with their description
+\warning
+These values are used by the BIOS to perform regular system operations and are not meant to be manipulated by the user, so writing invalid data to them can cause system instability.
+
+|Address  |Name                               |Description                             |
+|--------:|:----------------------------------|----------------------------------------|
+|<center><b>Date & Time</b></center>|||
+|10|\ref EVMU_ADDRESS_SYSTEM_YEAR_MSB_BCD     |BCD-Encoded Century (first two digits)  |
+|11|\ref EVMU_ADDRESS_SYSTEM_YEAR_LSB_BCD     |BCD-Encoded Year (last two digits)      |
+|12|\ref EVMU_ADDRESS_SYSTEM_MONTH_BCD        |BCD-Encoded Month (1-12)                |
+|13|\ref EVMU_ADDRESS_SYSTEM_DAY_BCD          |BCD-Encoded Day (1-31)                  |
+|14|\ref EVMU_ADDRESS_SYSTEM_HOUR_BCD         |BCD-Encoded Hour (0-23)                 |
+|15|\ref EVMU_ADDRESS_SYSTEM_MINUTE_BCD       |BCD-Encoded Minute (0-59)               |
+|16|\ref EVMU_ADDRESS_SYSTEM_SEC_BCD          |BCD-Encoded Second (0-59)               |
+|17|\ref EVMU_ADDRESS_SYSTEM_YEAR_MSB         |Century (first two digits)              |
+|18|\ref EVMU_ADDRESS_SYSTEM_YEAR_LSB         |Year (last two digits)                  |
+|19|\ref EVMU_ADDRESS_SYSTEM_MONTH            |Month (1-12)                            |
+|1A|\ref EVMU_ADDRESS_SYSTEM_DAY              |Day (1-31)                              |
+|1B|\ref EVMU_ADDRESS_SYSTEM_HOUR             |Hour (0-59)                             |
+|1C|\ref EVMU_ADDRESS_SYSTEM_MINUTE           |Minute (0-59)                           |
+|1D|\ref EVMU_ADDRESS_SYSTEM_SEC              |Second (0-59)                           |
+|1E|\ref EVMU_ADDRESS_SYSTEM_HALF_SEC         |Half Second (0-1)                       |
+|1F|\ref EVMU_ADDRESS_SYSTEM_LEAP_YEAR        |Leap Year (0 = no, 1 = yes)             |
+|<center><b>General</b></center>|||
+|30|\ref EVMU_ADDRESS_SYSTEM_MODE             |Index for BIOS Mode                     |
+|31|\ref EVMU_ADDRESS_SYSTEM_DATE_SET         |Date/Time Valid (0x0 = no, 0xFF = yes)  |
+|50|\ref EVMU_ADDRESS_SYSTEM_QUART_YEAR_MSB   |Quarter Year MSB                        |
+|51|\ref EVMU_ADDRESS_SYSTEM_QUART_YEAR_LSB   |Quarter Year LSB                        |
+|60|\ref EVMU_ADDRESS_SYSTEM_CURSOR_POS_COL   |Menu Cursor column position             |
+|61|\ref EVMU_ADDRESS_SYSTEM_CURSOR_POS_ROW   |Menu Cursor row position                |
+|6D|\ref EVMU_ADDRESS_SYSTEM_GAME_LAST_BLK    |Last block used by minigame             |
+|6E|\ref EVMU_ADDRESS_SYSTEM_BATTERY_CHECK    |Check Low battery (0x0 = yes, 0xFF = no)|
+|<center><b>Stack</b></center>|||
+|80|\ref EVMU_ADDRESS_SYSTEM_STACK_BASE       |First stack location                    |
+|81-FE|<center>Middle Stack</center>||
+|FF|\ref EVMU_ADDRESS_SYSTEM_STACK_END        |Last stack location                     |
+*/
+
+/*! \page sfrs Special Function Registers
+    \brief Listing and information on all known SFRs
+
+Address|Name                               |Description                             |
+------:|:----------------------------------|----------------------------------------|
+<center><a href="#sfrs_cpu"><b>CPU</b></a></center>|||
+100|<a href="#acc"><b>ACC</b></a>          |Accumulator                             |
+101|<a href="#psw"><b>PSW</b></a>          |Program Status Word                     |
+102|<a href="#b"><b>B</b></a>              |B Register                              |
+103|<a href="#c"><b>C</b></a>              |C Register                              |
+104|<a href="#trl"><b>TRL</b></a>          |Table Reference (Low Byte)              |
+105|<a href="#trh"><b>TRH</b></a>          |Table Reference (High Byte)             |
+106|<a href="#sp"><b>SP</b></a>            |Stack Pointer                           |
+107|<a href="#pcon"><b>PCON</b></a>        |Power Control                           |
+108|<a href="#ie"><b>IE</b></a>            |Interrupt Enable Control                |
+109|<a href="#ip"><b>IP</b></a>            |Interrupt Priority Control              |
+10A|<center>UNUSED</center>||
+10B|^||
+10C|^||
+10D|<a href="#ext"><b>EXT</b></a>          |External Memory Control                 |
+10E|<a href="#ocr"><b>OCR</b></a>          |Oscillation Control Register            |
+10F|<center>UNUSED</center>||
+<center><a href="#sfrs_timer0"><b>Timer 0</b></a></center>|||
+110|<a href="#t0cnt"><b>T0CNT</b></a>      |Timer 0 Control                         |
+111|<a href="#t0prr"><b>T0PRR</b></a>      |Timer 0 Prescaler Reload                |
+112|<a href="#t0l"><b>T0L</b></a>          |Timer 0 Low Byte                        |
+113|<a href="#t0lr"><b>T0LR</b></a>        |Timer 0 Low Byte Reload                 |
+114|<a href="#t0h"><b>T0H</b></a>          |Timer 0 High Byte                       |
+115|<a href="#t0hr"><b>T0HR</b></a>        |Timer 0 High Byte Reload                |
+116|<center>UNUSED</center>||
+117|^||
+<center><a href="#sfrs_timer1"><b>Timer 1</b></a></center>|||
+118|<a href="#t1cnt"><b>T1CNT</b></a>      |Timer 1 Control                         |
+119|<center>UNUSED</center>||
+11A|<a href="#t1lc"><b>T1LC</b></a>        |Timer 1 Low Compare Data                |
+11B|<a href="#t1l"><b>T1L/T1LR</b></a>     |Timer 1 Low Byte (Value or Reload)      |
+11C|<a href="#t1hc"><b>T1HC</b></a>        |Timer 1 High Compare Data               |
+11D|<a href="#t1h"><b>T1H/T1HR</b></a>     |Timer 1 High Byte (Value or Reload)     |
+11E|<center>UNUSED</center>||
+11F|^||
+<center><a href="#lcd"><b>LCD Screen</b></a></center>|||
+120|<a href="#mcr"><b>MCR</b></a>          |Mode Control                            |
+121|<center>UNUSED</center>||
+122|<a href="#stad"><b>STAD</b></a>        |Start Address                           |
+123|<a href="#cnr"><b>CNR</b></a>          |Character Number Register               |
+124|<a href="#tdr"><b>TDR</b></a>          |Time Division Register                  |
+125|<a href="#xbnk"><b>XBNK</b></a>        |XRAM Bank Address                       |
+126|<center>UNUSED</center>||
+127|<a href="#vccr"><b>VCCR</b></a>        |LCD Contrast Control Register           |
+128|<center>UNUSED</center>||
+129|^||
+12A|^||
+12B|^||
+12C|^||
+12D|^||
+12E|^||
+12F|^||
+<center><a href="#serial"><b>Serial I/O</b></a></center>|||
+130|<a href="#scon0"><b>SCON0</b></a>      |SIO0 Control                            |
+131|<a href="#sbuf0"><b>SBUF0</b></a>      |SIO0 Buffer                             |
+132|<a href="#sbr"><b>SBR</b></a>          |SIO Baud Rate Generator                 |
+133|<center>UNUSED</center>||
+134|<a href="#scon1"><b>SCON1</b></a>      |SIO1 Control                            |
+135|<a href="#sbuf1"><b>SBUF1</b></a>      |SIO1 Buffer                             |
+136|<center>UNUSED</center>||
+137|^||
+138|^||
+139|^||
+13A|^||
+13B|^||
+13C|^||
+13D|^||
+13E|^||
+13F|^||
+140|^||
+141|^||
+142|^||
+143|^||
+<center><a href="#port1"><b>Port 1</b></a></center>|||
+144|<a href="#p1"><b>P1</b></a>           |Port 1 Latch                             |
+145|<a href="#p1ddr"><b>P1DDR</b></a>     |Port 1 Data Direction Register           |
+146|<a href="#p1fcr"><b>P1FCR</b></a>     |Port 1 Function Control Register         |
+147|\b ?                                  |Bits[0-6]: Logic High, Bit[7]: R/W       |
+148|\b ?                                  |BIOS writes once with 0x00 on startup    |
+149|<center>UNUSED</center>||
+14A|^||
+14B|^||
+<center><a href="#port3"><b>Port 3</b></a></center>|||
+14C|<a href="#p3"><b>P3</b></a>           |Port 3 Latch                             |
+14D|<a href="#p3ddr"><b>P3DDR</b></a>     |Port 3 Data Direction Register           |
+14E|<a href="#p3int"><b>P3INT</b></a>     |Port 3 Interrupt Control                 |
+14F|<center>UNUSED</center>||
+150|^||
+151|\b ?                                  |BIOS sets bit 5 only                     |
+152|UNUSED||
+153|^||
+<center><a href="#flash"><b>Flash</b></a></center>|||
+154|<a href="#fpr"><b>FPR</b></a>         |Flash Program Register                   |
+155|\b ?                                  |BIOS writes once with 0xFF               |
+156|<center>UNUSED</center>||
+157|^||
+158|^||
+159|^||
+15A|^||
+15B|^||
+<center><a href="#port7"><b>Port 7</b></a></center>|||
+15C|<a href="#p7"><b>P7</b></a>           |Port 7 Latch                             |
+15D|<a href="#i01cr"><b>I01CR</b></a>     |External Interrupts 0-1 Control          |
+15E|<a href="#i23cr"><b>I23CR</b></a>     |External Interrupts 2-3 Control          |
+15F|<a href="#isl"><b>ISL</b></a>         |Input Signal Selection                   |
+<center><a href="#maple"><b>Maple</b></a></center>|||
+160|<a href="#mplsw"><b>MPLSW</b></a>     |Maple Status Word                        |
+161|<a href="#mplsta"><b>MPLSTA</b></a>   |Maple Start Transfer                     |
+162|<a href="#mplrst"><b>MPLRST</b></a>   |Maple Reset                              |
+<center><a href="#work_ram"><b>Work RAM</b></a></center>|||
+163|<a href="#vsel"><b>VSEL</b></a>       |VMS Control Registers                    |
+164|<a href="#vrmad1"><b>VRMAD1</b></a>   |Work RAM Access Address 1                |
+165|<a href="#vrmad2"><b>VRMAD2</b></a>   |Work RAM Access Address 2                |
+166|<a href="#vtrbf"><b>VTRBF</b></a>     |Send/Receive Buffer                      |
+167|<a href="#vlreg"><b>VLREG</b></a>     |Maple Word Length Registration           |
+168|<center>UNUSED</center>||
+169|^||
+16A|^||
+16B|^||
+16C|^||
+16D|^||
+16E|^||
+16F|^||
+170|^||
+171|^||
+172|^||
+173|^||
+174|^||
+175|^||
+176|^||
+177|^||
+178|^||
+179|^||
+17A|^||
+17B|^||
+17C|^||
+17D|^||
+17E|^||
+<center><a href="#base_timer"><b>Base Timer</b></a></center>|||
+17F|<a href="#btcr"><b>BTCR</b></a>       |Base Time Control Register                |
+
+\section sfrs_cpu CPU
+\subsection acc [0x100] ACC: Accumulator
+<p>8-bit register used as the implicit target register for most instructions and operations, such as arithmetic computation, transfers, I/O, and more.</p>
+
+\subsection psw [0x101] PSW: Program Status Word
+<p>PSW consists of flags for the results of arithmetic instruction execution as well as for specifying RAM banks and indirect address registers.</p>
+|7 |6 |5|4    |3    |2 |1     |0|
+|--|--|-|-----|-----|--|------|-|
+|CY|AC| |IRBK1|IRBK0|OV|RAMBK0|P|
+
+<p><b>CY (bit 7): Carry Flag</b><br>
+Set when carrying from the MSB after an addition or when a borrow to the MSB occurs after an addition. Otherwise, the flag is reset. The flag is also modified by rotation instructions that include CY.</p>
+
+<p><b>AC (bit 6): Auxiliary Carry Flag</b><br>
+Set when bit 3 of the accumulator propagates over to the next higher digit as a carry or to the next lower digit as a borrow. Otherwise it is reset.</p>
+
+<p><b>IRBKx (bits 3-4): Indirect Address Register Bank</b><br>
+Specifies which of the 4 register banks to use as indirect address registers when using indirect addressing. See \ref indirect_addressing for more information.</p>
+
+<p><b>OV (bit 2): Overflow Flag</b><br>
+Set when an overflow occurs in addition or subtraction. Also set when the result of a multiplication is greater than 256 or division by zero is performed.</p>
+
+<p><b>RAMBK0 (bit 1): RAM Bank</b><br>
+Specifies the current RAM bank for data access. Bank 0 contains the stack and is reserved for use by the system BIOS while Bank 1 is general purpose application RAM. See \ref memory_map for more information.</p>
+
+<p><b>P (bit 0): Parity Flag</b><br>
+Set when the total number of bits set within the accumulator is an odd number. Reset to 0 when the total number of bits set within the accumulator is even. Read-only.</p>
+
+\subsection b [0x102] B: B Register
+<p>Used in combination with ACC and the C Register for sourcing and storing data with arithmetic operations.</p>
+
+\subsection c [0x103] C: C Register
+<p>Used in combination with ACC and the B Register for sourcing and storing data with arithmetic operations.</p>
+
+\subsection trl [0x104] TRL: Table Reference Register (Low Byte)
+\subsection trh [0x105] TRH: Table Reference Register (High Byte)
+<p>TRL and TRH combine to form a single 16-bit register, TRR, which is used for ROM and flash addressing. The LDC instruction adds TRR register to the value stored within the ACC to form a target address for loading data into the accumulator. The BIOS's flash subroutines (read/write) also use TRR for determining which address to target within the specified bank.
+
+\subsection sp [0x106] TRL: Stack Pointer
+Used to point to the last filled address within the stack region of RAM bank 0. It is incremented before moving data onto the stack with a PUSH instruction and is decremented after fetching data from the stack with the POP instruction.
+
+\subsection pcon [0x107] PCON: Power Control
+Used to suspend the CPU and its peripherals to reduce power consumption. These bits are automatically reset when execution is resumed.
+|7|6|5|4|3|2|1   |0   |
+|-|-|-|-|-|-|----|----|
+| | | | | | |HOLD|HALT|
+<p><b>HOLD (bit 1): Suspend CPU and Timers</b><br>
+When set to 1, puts the VMU into a deep sleep, stopping the CPU, all timers, and all oscillators. Only an external interrupt or reset will cause operations to resume. Not in the official documents and will cause the BIOS to no longer maintain the proper time, since the base timer is halted.
+</p>
+
+<p><b>HALT (bit 0): Halt CPU</b><br>
+When set to 1, stops CPU instruction execution while allowing timers and all other peripherals to continue operating normally. Any interrupt will wake the CPU up and resume execution.
+</p>
+
+\subsection ie [0x108] IE: Interrupt Enable Control
+|7  |6|5|4|3|2|1  |0  |
+|---|-|-|-|-|-|---|---|
+|IE7| | | | | |IE1|IE0|
+<p><b>IE7 (bit 7): Master Interrupt Enable</b><br>
+When set to 1, all interrupt requests are enabled. When reset to 0, "high" and "low" priority interrupts are disabled.</p>
+<p><b>IE1-IE0 (bits 1-0): Interrupt Priority Control</b><br>
+Sets the priority level of external interrupts INT1 and INT0:<br>
+|IE1|IE0|INT1 Priority|INT0 Priority|
+|---|---|-------------|-------------|
+|0  |0  |Highest      |Highest      |
+|1  |0  |Low          |Highest      |
+|X  |1  |Low          |Low          |
+</p>
+
+\subsection ip [0x109] IP: Interrupt Priority Control
+<p>Provides flags for controlling whether interrupts are given LOW or HIGH priority ranking</p>
+|7  |6  |5  |4  |3  |2  |1  |0  |
+|---|---|---|---|---|---|---|---|
+|IP7|IP6|IP5|IP4|IP3|IP2|IP1|IP0|
+<p><b>IP7 (bit 7): P3 Interrupt Priority</b><br>
+Sets the priority for Port 3 interrupts. 0: Low, 1: High.</p>
+<p><b>IP6 (bit 6): Maple Interrupt Priority</b><br>
+Sets the priority for Maple interrupts. 0: Low, 1: High.
+\warning
+This is an undocumented bitfield which was most likely intentionally hidden. While its behavior has yet to be confirmed, this hole perfectly aligns with the location of the Maple interrupt which was also undocumented.</p>
+<p><b>IP5 (bit 5): SIO1 Interrupt Priority</b><br>
+Sets the priority for Serial I/O 1 interrupts. 0: Low, 1: High.</p>
+<p><b>IP4 (bit 4): SIO0 Interrupt Priority</b><br>
+Sets the priority for Serial I/O 0 interrupts. 0: Low, 1: High.</p>
+<p><b>IP3 (bit 3): T1 Interrupt Priority</b><br>
+Sets the priority for Timer 1 interrupts. 0: Low, 1: High.</p>
+<p><b>IP2 (bit 2): T0H Interrupt Priority</b><br>
+Sets the priority for Timer 0 High overflow interrupts. 0: Low, 1: High.</p>
+<p><b>IP1 (bit 1): INT3/Base Timer Interrupt Priority</b><br>
+Sets the priority for Internal Interrupt Source 3 and Base Timer interrupts. 0: Low, 1: High.</p>
+<p><b>IP0 (bit 0): INT2/T0L Interrupt Priority</b><br>
+Sets the priority for Internal Interrupt Source 2 and Timer 0 Low overflow interrupts. 0: Low, 1: High.</p>
+
+\subsection ext [0x10D] EXT: External Memory Control
+<p>Controls the source and base address of ROM memory space accesses.</p>
+\warning
+This register was intentionally left undocumented in the hardware documentation
+and was never meant to be modified directly. You are meant to use the CHANGE macro instruction, which manages this register for you.
+
+|7|6|5|4|3   |2   |1     |0   |
+|-|-|-|-|----|----|------|----|
+| | | | |EXT3|EXT2|LDCEXT|EXT0|
+
+<p><b>EXT3 (bit 3): External Bank Address</b><br>
+Controls which 64KB bank is selected for the ROM source.</p>
+<p><b>EXT2 (bit 2): ?</b><br>
+Undocumented flag.
+<p><b>LDCEXT (bit 1): LDC Instruction Source?</b><br>
+Hardware docs say:</p>
+\note
+[If the application is running], "the system switches from the application (game mode) to the system program.
+However, if bit 1 (LDCEXT) of the external memory control register is set, the CHANGE instruction will not cause
+a change to the system program. The application continues to run."
+<p><b>EXT0 (bit 0): ?</b><br>
+Undocumented flag.</p>
+
+\subsection ocr [0x10E] OCR: Oscillation Control Register
+<p>Controls power to the oscillators and determine which is used by the system clock.</p>
+
+|7   |6|5   |4   |3|2|1   |0   |
+|----|-|----|----|-|-|----|----|
+|OCR7| |OCR5|OCR4| | |OCR1|OCR0|
+
+<p><b>OCR 7 (bit 7): System Clock Divider</b><br>
+When set to 1 (default), the system clock frequency is divided by 6. When reset to 0, its divided by 12.</p>
+
+<p><b>OCR5-4 (bits 5-4): System Clock Selector</b><br>
+Selects the system clock source based on the values in the following table:</p>
+|OCR5|OCR4|Source Oscillator|
+|----|----|-----------------|
+|0   |0   |RC               |
+|0   |1   |CF               |
+|1   |0   |Quartz           |
+|1   |1   |CF               |
+
+<p><b>OCR1 (bit 1): RC Oscillator Control</b><br>
+When set to 1, the RC oscillator is disabled, preserving power. When reset to 0, it is enabled.</p>
+
+<p><b>OCR0 (bit 0): CF Oscillator Control</b><br>
+When set to 1 (default), the CF oscillator ceases operation. When reset to 0 (as when the VMU is docked), it begins to operate.</p>
+
+\warning
+It has been proven that the CF oscillator, which is usually used when the VMU is docked in the controller, can be enabled while running in standalone GAME mode. However, this drains the batteries quickly. Look into buying an AA battery supply adapter, USB power cable mod, or rechargeable LIR2032s if this is an issue and you wish to use this clock source.
+
+\note
+The VMU hardware docs make mention of not disabling the Quartz oscillator, so I'm assuming perhaps OCR2 is the control flag for it?
+
+\section sfrs_timer0 Timer 0
+
+\subsection t0cnt [0x110] T0CNT: Timer 0 Control
+<p>Configures and controls the operation of the Timer 0 peripheral.</p>
+
+|7     |6     |5     |4     |3     |2    |1     |0    |
+|------|------|------|------|------|-----|------|-----|
+|T0HRUN|T0LRUN|T0LONG|T0LEXT|T0HOVF|T0HIE|T0LOVF|T0LIE|
+
+<p><b>T0HRUN (bit 7): Timer 0 High Count Control</b><br>
+Setting this flag to 1 starts the T0H counter by supplying the clock to it. Resetting it to 0 stops counting and reloads T0H with T0HR.</p>
+
+<p><b>T0LRUN (bit 6): Timer 0 Low Count Control</b><br>
+Setting this flag to 1 starts the T0L counter by supplying the clock to it. Resetting it to 0 stops counting and reloads T0L with T0LR.</p>
+
+<p><b>T0LONG (bit 5): Timer 0 Bit Length Specifier</b><br>
+When set to 1, 16-bit mode is used. When reset to 0, 8-bit mode used.</p>
+
+<p><b>T0LEXT (bit 4): Timer 0 Low Input Clock Select</b><br>
+Specifies the clock supplied to T0L. When set to 1, it is driven by an external input signal (source determined by ISL). When reset to 0, the prescaler output is selected.</p>
+
+<p><b>T0HOVF (bit 3): Timer 0 High Overflow Flag</b><br>
+This flag is set whenever T0H overflows and otherwise never changes. It must be reset by the interrupt handler or application.</p>
+
+<p><b>T0HIE (bit 2): Timer 0 High Interrupt Enable</b><br>
+Enables or disables generation of interrupt requests upon T0H overflow. When set to 1, the T0H interrupt vector (0x0023) is used. When reset to zero, no request is generated.</p>
+
+<p><b>T0LOVF (bit 1): Timer 0 Low Overflow Flag</b><br>
+This flag is set whenever T0L overflows and otherwise never changes. It must be reset by the interrupt handler or application. This flag is not used when in 16-bit mode.</p>
+
+<p><b>T0LIE (bit 0): Timer 0 Low Interrupt Enable</b><br>
+Enables or disables generation of interrupt requests upon T0L overflow. When set to 1, the T0L interrupt vector (0x0013) is used. When reset to zero, no request is generated.</p>
+
+\subsection t0prr [0x111] T0PRR: Timer 0 Prescaler Reload
+<p>Stores the reload value for the Timer 0 prescaler register (TPR).</p>
+
+\subsection t0l [0x112] T0L: Timer 0 Low Byte
+<p>Read-only register storing the current value of either the first independently operating 8-bit counter/timer of Timer 0, or the low byte of the combined 16-bit counter/timer of Timer 0, depending on the current <a href="#t0cnt">T0CNT</a> configuration</p>
+
+\subsection t0lr [0x113] T0LR: Timer 0 Reload
+<p>The value used to reload the T0L timer/counter is stored within this register. When using 8-bit mode, its contents are reloaded into T0L upon overflow.</p>
+
+\subsection t0h [0x114] T0H: Timer 0 High Byte
+<p>Read-only register storing the current value of either the second independently operating 8-bit counter/timer of Timer 0, or the high byte of the combined 16-bit counter/timer of Timer 0, depending on the current <a href="#t0cnt">T0CNT</a> configuration.</p>
+
+\subsection t0hr [0x115] T0HR: Timer 0 High Reload
+<p>The value used to reload the T0H timer/counter is stored within this register. Upon overflow, its contents are loaded into T0H.</p>
+
+\section sfrs_timer1 Timer 1
+
+\subsection t1cnt [0x118] T1CNT: Timer 1 Control
+<p>Configures and controls the operation of the Timer 1 peripheral.</p>
+
+|7     |6     |5     |4     |3     |2    |1     |0    |
+|------|------|------|------|------|-----|------|-----|
+|T1HRUN|T1LRUN|T1LONG|ELDT1C|T1HOVF|T1HIE|T1LOVF|T1LIE|
+
+<p><b>T1HRUN (bit 7): Timer 1 High Count Control</b><br>
+When in 8-bit mode, setting this flag to 1 starts the T1H counter by supplying the clock to it. Resetting it to 0 stops counting and reloads T1H with T1HR. When in 16-bit mode, clearing (0) this bit will cause the timer to be clocked at twice the clock rate.</p>
+
+<p><b>T1LRUN (bit 6): Timer 1 Low Count Control</b><br>
+When in 8-bit mode, setting this flag to 1 starts the T1L counter by supplying the clock to it. Resetting it to 0 stops counting and reloads T1L with T1LR. When in 16-bit mode, clearing (0) this bit disables both timer halves and causes both counters to reload from their respective T1xR registers.</p>
+
+<p><b>T1LONG (bit 5): Timer 1 Bit Length Specifier</b><br>
+When set to 1, 16-bit mode is used. When reset to 0, 8-bit mode used.</p>
+- 8-bit mode: T1L and T1H will count independently, and only T1L will produce sound, this is the mode used by the official minigames.
+- 16-bit mode: T1L will count like normal, but once T1L overflows, it will count T1H. T1LC will not apply its value until T1H overflow. Unlike 8-bit mode, T1H now outputs a sound waveform that is logically ORed with the waveform output by T1L, but it's not a pulse wave with a width like T1L, it's a sequence of 1-cycle clicks that are enabled by each bit of the T1HC register. The highest octave is the most significant bit and is one octave lower than that output by T1L, and each bit after bit 7 is lowered by one octave and shifted 180 degrees in phase, so that they form layers of different audible octave clicks. The value of T1HR affects the interrupts frequency normally, but won't affect the sound in an usual way. The overall frequency of T1H is every two overflows of T1L only, but if the most significant bits of T1HC are set (1), it will cause the lowest octaves to be muted.
+
+<p> Examples of T1HC values:
+|T1HC 7 |T1HC 6 |T1HC 5 |T1HC 4 |T1HC 3 |T1HC 2 |T1HC 1 |T1HC 0 |Waveform                        |
+|-------|-------|-------|-------|-------|-------|-------|-------|--------------------------------|
+|1      |0      |0      |0      |0      |0      |0      |0      |.......'.......'.......'.......'|
+|1      |1      |0      |0      |0      |0      |0      |0      |.......'...'...'.......'...'...'|
+|1      |1      |1      |0      |0      |0      |0      |0      |.......'...'...'...'...'...'...'|
+|1      |0      |1      |0      |0      |0      |0      |0      |.......'.......'...'...'.......'|
+
+<p> Examples of T1HR values:
+|T1HR 7 |T1HR 6 |T1HR 5 |T1HR 4 |T1HR 3 |T1HR 2 |T1HR 1 |T1HR 0 |Effect                      |
+|-------|-------|-------|-------|-------|-------|-------|-------|----------------------------|
+|0      |x      |x      |x      |x      |x      |x      |x      |No octaves muted            |
+|1      |0      |x      |x      |x      |x      |x      |x      |T1HC 0 muted (lowest octave)|
+|1      |1      |0      |x      |x      |x      |x      |x      |T1HC 0 and 1 muted          |
+|1      |1      |1      |0      |x      |x      |x      |x      |T1HC 0, 1 and 2 muted       |
+|1      |1      |1      |1      |1      |1      |1      |1      |T1HC fully muted            |
+<p> x = don't care
+
+<p> Waveform relationships
+|Timer Half|Waveform                                                        |Configuration              |
+|----------|----------------------------------------------------------------|---------------------------|
+|T1L       |''..''..''..''..''..''..''..''..''..''..''..''..''..''..''..''..|Width set to square wave   |
+|T1H       |.......'.......'.......'.......'.......'.......'.......'.......'|Highest octave only        |
+|T1H       |.......'...'...'.......'...'...'.......'...'...'.......'...'...'|Highest two octaves enabled|
+<p> Note that the last waveform looks like it's acting on almost every overflow, but it's because of the 180 degree offset in phase of each subsequent octave.
+
+
+<p><b>ELDT1C (bit 4): Pulse Generator Data Update</b><br>
+Controls the effect of T1LC and T1HC registers on PWM sound generation. When this bit is set (1), the values of T1LC/T1HC, which determine the pulse width of the generated waveform, will be sent to the pulse generator when T1L/T1H overflows. When the bit is reset (0), this does not occur.
+
+Regardless of whether this bit is set, T1LC/T1HC will be sent to the pulse generator whenever T1L/T1H is stopped or started. That is, most software which plays sound doesn't need to touch ELDT1C, if it simply stops the timer in between making changes to T1LC/T1LR.
+
+<p><b>T1HOVF (bit 3): Timer 1 High Overflow Flag</b><br>
+This flag is set whenever T1H overflows and otherwise never changes. It must be reset by the interrupt handler or application.</p>
+
+<p><b>T1HIE (bit 2): Timer 1 High Interrupt Enable</b><br>
+Enables or disables generation of interrupt requests upon T1H overflow. When set to 1, the T1H interrupt vector (0x002B) is used. When reset to zero, no request is generated.</p>
+
+<p><b>T1LOVF (bit 1): Timer 1 Low Overflow Flag</b><br>
+This flag is set whenever T1L overflows and otherwise never changes. It must be reset by the interrupt handler or application. Unlike T0L, the flag is always set when an overflow occurs at T1L, regardless of T1's bit length.</p>
+
+<p><b>T1LIE (bit 0): Timer 1 Low Interrupt Enable</b><br>
+Enables or disables generation of interrupt requests upon T1L overflow. When set to 1, the T1 interrupt vector (0x002B) is used. When reset to zero, no request is generated.</p>
+
+\subsection t1lc [0x11A] T1LC: Timer 1 Low Compare Data
+<p>Data which gets fed to a comparator and compared with the value of T1L, for generating the resulting PWM signal. When the data is less than or equal to the value of T1L, the resulting signal has a LOW output, and when it's greater than, it has a HIGH output.
+
+<p>When ELDT1C is set to 1, and this register is modified, its value is immediately sent to the comparator. When it is reset to 0, the comparator is never updated as T1LC changes.</p>
+
+\subsection t1l [0x11B] T1L/T1LR: Timer 1 Low Byte (Value or Reload)
+<p>Depending on whether this register is written to or read from, it is either accessing T1L or T1LR. When reading, it is accessing T1L, the current value of the Timer 1 Counter/Timer's low byte. When writing, it is accessing T1LR, the reload value which is copied to T1L when an overflow occurs.</p>
+
+\subsection t1hc [0x11C] T1HC: Timer 1 High Compare Data
+<p>Data which gets fed to a comparator and compared with the value of T1H, for generating the resulting PWM signal. When the data is less than or equal to the value of T1H, the resulting signal has a LOW output, and when it's greater than, it has a HIGH output.
+
+\subsection t1h [0x11D] T1H/T1HR: Timer 1 High Byte (Value or Reload)
+<p>Depending on whether this register is written to or read from, it is either accessing T1H or T1HR. When reading, it is accessing T1H, the current value of the Timer 1 Counter/Timer's high byte. When writing, it is accessing T1HR, the reload value which is copied to T1H when an overflow occurs.</p>
+
+\section lcd LCD Screen
+
+\warning
+These registers are largely mysterious and unknown. They are initialized and managed by the BIOS and, other than <a href="#xbnk">XBNK</a>, don't really need to be modified... except in the name of science...
+
+\subsection mcr [0x120] MCR: Mode Control
+|7   |6   |5   |4   |3   |2|1|0   |
+|----|----|----|----|----|-|-|----|
+|MCR7|MCR6|MCR5|MCR4|MCR3| | |MCR0|
+
+<p><b>MCR7-MCR5 (bits 7-5): LCD Clock Division Ratio</b><br>
+The official documentation simply says "always set these bits to 0" for a 1/1 ratio.</p>
+
+\note
+Whether other values are acceptable or not is unknown.
+
+<p><b>MCR4 (bit 4): LCD Clock 1/2 Division Ratio Select Circuit</b><br>
+Controls whether to divide the ratio given by MCR7-MCR5 by 1/2 or to select it directly as the LCD clock.</p>
+
+<p>When set to 1, The LCD clock is not divided, giving a frame frequency of 165.5Hz. When reset to 0, the LCD clock frequency is divided by 1/2, giving a frame frequency of 82.7 Hz.</p> The default value for this flag is 0.
+
+<p><b>MCR3 (bit 3): LCD Controller Control</b><br>
+Controls whether the display controller operates. When reset to 0, operation ceases, meaning the screen is still powered, but it no longer updates to reflect changes in XRAM. When set to 1, the screen automatically refreshes to reflect changes in the contents of XRAM.</p>
+
+<p><b>MCR0 (bit 0): Display Mode Select</b><br>
+The official hardware docs only say this should always be set to 1, in order to set the display to "graphics mode."
+
+\note
+What the other mode is or how it operates is unknown.
+
+\subsection stad [0x122] STAD: Start Address
+<p>Configures XRAM's start address. A value of 0 is assumed to be the regular XRAM start address of 0x180. Every value increment of STAD will advance XRAM's start address by 2 bytes.</p>
+
+\warning
+Some start addresses are unavailable. Do not use xx6H, xx7H, xxEH, or xxFH as start addresses.
+
+\warning
+Since using the BIOS subroutine's flash write operations will attempt to modify the state of the FLASH icon, you must reset STAD back to 0 before using them, in order to prevent the BIOS from writing to a random XRAM location.
+
+\note
+I have personally never seen a single VMU game or application modify these settings. Only bother with it if you know what you're doing or are doing so in the name of science.
+
+\subsection cnr [0x123] CNR: Character Number Register
+The official documentation merely says this register is not accessible by applications... Sure it is.
+
+This register is Write-Only and 7-bits large, how it behaves is not exactly well understood but it's likely the amount of bytes that every line of the LCD should have, setting it to anything other than x0000101 will garble the frame
+
+
+\subsection tdr [0x124] TDR: Time Division Register
+The official documentation merely says that the register is not accessible by applications... BS.
+
+This register is Write-Only and 6-bits large, it controls how many lines the LCD will display, setting it too low will cause the contrast to get higher, the default setting is xx100000. It appears that this also changes the refresh rate of the LCD, low values will cause the displayed lines to be repeated over all the unscanned lines on the LCD panel
+
+\note the icons appear to be just a scanline to the LCD controller, messing with this register also affects how the icons are scanned
+
+\subsection xbnk [0x125] XBNK: XRAM Bank Address
+<p>Swaps the active XRAM bank number, which is mapped to the end of the internal RAM address space.</p>
+
+|7|6|5|4|3|2|1    |0    |
+|-|-|-|-|-|-|-----|-----|
+| | | | | | |XBNK1|XBNK0|
+
+<p><b>XBNK1-0 (bits 1-0): XRAM Bank Select</b><br>
+Sets the active XRAM bank.</p>
+
+|XBNK1|XBNK0|Bank|Purpose                  |
+|-----|-----|----|-------------------------|
+|0    |0    |0   |Top-Half of LCD Screen   |
+|0    |1    |1   |Bottom-Half of LCD Screen|
+|1    |0    |2   |Icons                    |
+|1    |1    |X   |Invalid                  |
+
+
+\subsection vccr [0x127] VCCR: LCD Contrast Control Register
+<p>Write-only register controlling various aspects of the LCD display, but there is no contrast control.</p>
+
+|7    |6    |5    |4    |3    |2    |1    |0    |
+|-----|-----|-----|-----|-----|-----|-----|-----|
+|VCCR7|VCCR6|VCCR5|VCCR4|VCCR3|VCCR2|VCCR1|VCCR0|
+
+
+<p><b>VCCR7 (bit 7): LCD Power Control</b><br>
+Controls whether the display is powered or not. When reset to 0, the screen is shut off. When set to 1, it is powered on.</p>
+
+<p><b>VCCR6 (bit 6): LCD XRAM Access Control</b><br>
+Controls whether XRAM memory is accessible to the CPU. When reset to 0, XRAM memory can be read from and written to. When set to 1, this access becomes disabled.</p>
+
+\warning
+The documentation says to always disable XRAM access when the quartz oscillator is used as the system clock and to only access it with the RC (or CF) oscillator(s).
+
+<p><b>VCCR5-0 (bits 5-0): ?</b><br>
+The official documentation merely says to ALWAYS set these bits to 0 when accessing VCCR.</p>
+
+\note
+This is most likely the field which controls the contrast of the LCD screen, which the VMU doesn't support.
+
+\section serial Serial I/O
+\subsection scon0 [0x130] SCON0: SIO0 Control
+<p>Controls various aspects of the operation of the Serial IO 0 peripheral.</p>
+
+|7     |6     |5|4     |3     |2     |1     |0     |
+|------|------|-|------|------|------|------|------|
+|SCON07|SCON06| |SCON04|SCON03|SCON02|SCON01|SCON00|
+
+<p><b>SCON07 (bit 7): Polarity Control</b><br>
+Controls the polarity of the the transfer clock, SCK0, which is used by SIO0.</p>
+
+<p>When set to 1, SCK0 is 0 when operation stops and bit 0 of SBUF0 is output.<br>
+When reset to 0, SCK0 is 0 when operation stops and the last transferred bit is held as the output</p>
+
+<p><b>SCON06 (bit 6): Overrun Flag</b><br>
+Set to 1 when an 8-bit data transfer is complete and the falling edge of the transfer clock is received, the flag is set. During continuous transfer, the flag is set every 8 bits.</p>
+
+\note
+This flag is never reset automatically and must be reset by the application.
+
+<p><b>SCON04 (bit 4): Transfer Bit Length Control</b><br>
+Swaps SIO0 transfer data length between 8-bit continuous mode (1) or 8-bit mode (0). When set to 1, 2 or more bytes of data can be sent continuously in 8-bit units. When reset to 0, only 8-bits of data can be sent.</p>
+
+<p><b>SCON03 (bit 3): SIO0 Operation Control</b><br>
+Starts or stops SIO0 transfers. When set to 1, a transfer starts, resetting the flag when 8bits have been transferred. When reset to 0, serial transfer stops.</p>
+
+<p><b>SCON02 (bit 2): LSB/MSB Start Select</b><br>
+Selects the bit order for data transfers. When set to 1, the transfer starts with the MSB and ends with the LSB. When reset to 0, the transfer starts with the LSB and ends with the MSB.</p>
+
+<p><b>SCON01 (bit 1): SIO0 Transfer End Flag</b><br>
+Detects the end of a serial transfer. It gets set to 1 when a serial transfer of 8 bits has completed. While set, if the falling edge of the transfer clock is detected, SCON06 gets set to 1, signalling an overrun.</p>
+
+\note
+This flag is not reset automatically. It must be done by the application.
+
+<p><b>SCON00 (bit 0): SIO0 Interrupt Request Enable Control</b><br>
+Enables or disables interrupt request generation upon SIO0 transfer end. When set to 1, interrupt vector 0x0033 is called. When reset to 0, no interrupt request is generated.</p>
+
+\subsection sbuf0 [0x131] SBUF0: SIO0 Buffer
+<p>Used as a buffer to store TX/RX data from SIO0.</p>
+
+\subsection sbr [0x132] SBR: SIO Baud Rate Generator
+<p>Sets the transfer rate for both SIO0 and SIO1 when the internal clock is used as the transfer clock. The transfer rate, TSBR, can be obtained by the following:</p>
+
+    TSBR = (256 - [SBR setting value]) x 2 x Tcyc
+    ____          ________
+        |        |        |        (Tcyc = cycle clock)
+        |________|        |____
+
+        |<-Transfer Rate->|
+                TSBR
+
+\subsection scon1 [0x134] SCON1: SIO1 Control
+<p>Controls various aspects of the operation of the Serial IO 1 peripheral.</p>
+
+|7|6     |5|4     |3     |2     |1     |0     |
+|-|------|-|------|------|------|------|------|
+| |SCON16| |SCON14|SCON13|SCON12|SCON11|SCON10|
+
+<p><b>SCON06 (bit 7): Overrun Flag</b><br>
+Set to 1 when an 8-bit data transfer is complete and the falling edge of the transfer clock is received, the flag is set. During continuous transfer, the flag is set every 8 bits.</p>
+
+\note
+This flag is never reset automatically and must be reset by the application.
+
+<p><b>SCON14 (bit 4): Transfer Bit Length Control</b><br>
+Swaps SIO1 transfer data length between 8-bit continuous mode (1) or 8-bit mode (0). When set to 1, 2 or more bytes of data can be sent continuously in 8-bit units. When reset to 0, only 8-bits of data can be sent.</p>
+
+<p><b>SCON13 (bit 3): SIO0 Operation Control</b><br>
+Starts or stops SIO0 transfers. When set to 1, a transfer starts, resetting the flag when 8bits have been transferred. When reset to 0, serial transfer stops.</p>
+
+<p><b>SCON12 (bit 2): LSB/MSB Start Select</b><br>
+Selects the bit order for data transfers. When set to 1, the transfer starts with the MSB and ends with the LSB. When reset to 0, the transfer starts with the LSB and ends with the MSB.</p>
+
+<p><b>SCON01 (bit 1): SIO1 Transfer End Flag</b><br>
+Detects the end of a serial transfer. It gets set to 1 when a serial transfer of 8 bits has completed. While set, if the falling edge of the transfer clock is detected, SCON16 gets set to 1, signalling an overrun.</p>
+
+\note
+This flag is not reset automatically. It must be done by the application.
+
+<p><b>SCON00 (bit 0): SIO1 Interrupt Request Enable Control</b><br>
+Enables or disables interrupt request generation upon SIO1 transfer end. When set to 1, interrupt vector 0x003B is called. When reset to 0, no interrupt request is generated.</p>
+
+\subsection sbuf1 [0x135] SCON1: SIO1 Buffer
+<p>Used as a buffer to store TX/RX data from SIO1.</p>
+
+\section port1 Port 1
+\note
+The hardware docs show a "VMS Serial interface circuit" with pins going to Port 1 output. Figure out how to set/configure these.
+\subsection p1 [0x144] P1: Port 1 Latch
+<p>Contains the latched data for I/O Port 1.</p>
+
+|Bit     |7  |6   |5   |4  |3  |2   |1  |0  |
+|--------|---|----|----|---|---|----|---|---|
+|Port 1  |P17|P16 |P15 |P14|P13|P12 |P11|P10|
+|Function|PWM|TEST|SCK1|SB1|SO1|SCK0|SB0|SO0|
+
+\note
+Hardware docs show P16's signal input as BUZZ.
+
+\subsection p1ddr [0x145] P1DDR: Port 1 Data Direction Register
+<p>Write-only register used to configure whether bits 7 to 0 of Port 1 are used for input or output. Setting a bit to 1 configures the corresponding port pin to be in output mode. Resetting a bit to 0 sets the pin to be in input mode.</p>
+
+\subsection p1fcr [0x146] P1FCR: Port 1 Function Control Register
+<p>Configures the operation of bits 7-0 of Port 1.</p>
+
+|7     |6     |5     |4     |3     |2     |1     |0     |
+|------|------|------|------|------|------|------|------|
+|P17FCR|P16FCR|P15FCR|P14FCR|P13FCR|P12FCR|P11FCR|P10FCR|
+
+<p><b>P17FCR (bit 7): Select P17 Function</b><br>
+When set to 1, the logical sum of the PWM signal and port latch data is output on P17. When reset to 0, the port latch data is output.</p>
+
+<p><b>P16FCR (bit 6): Select P16 Function</b><br>
+Supposedly fixed to 0 and cannot be manipulated by the application.</p>
+
+<p><b>P15FCR (bit 5): Select P15 Function</b><br>
+When set to 1, the logical sum of the serial interface clock 1 (SCK1) and the port latch data is output on P15. When reset to 0, the port latch data is output.</p>
+
+<p><b>P14FCR (bit 4): Select P14 Function</b><br>
+When set to 1, the logical sum of the serial 1 interface data (SB1) and port latch data is output on P14. When reset to 0, the port latch data is output.</p>
+
+<p><b>P13FCR (bit 3): Select P13 Function</b><br>
+When set to 1, the logical sum of the serial 1 interface data (SO1) and port latch data is output on P13. When reset to 0, the port latch data is output.</p>
+
+<p><b>P12FCR (bit 2): Select P12 Function</b><br>
+When set to 1, the logical sum of the serial interface clock 0 (SCK0) and the port latch data is output on P12. When reset to 0, the port latch data is output.</p>
+
+<p><b>P11FCR (bit 1): Select P11 Function</b><br>
+When set to 1, the logical sum of the serial 0 interface data (SB0) and port latch data is output on P11. When reset to 0, the port latch data is output.</p>
+
+<p><b>P10FCR (bit 0): Select P10 Function</b><br>
+When set to 1, the logical sum of the serial 0 interface data (SO1) and port latch data is output on P10. When reset to 0, the port latch data is output.</p>
+
+\warning
+As with any IO port, writes are to latched port registers, while normal reads access the port directly; however, certain instructions also read port latched data: BPC, DBNZ, INC, DEC, ST1, CLR1, NOT1.
+
+\subsection p1tr [0x147] P1TR: Port 1 Test Register
+<p>This register is not documented and appears to have some strange test feature.
+
+|7   |6|5|4|3|2|1|0|
+|----|-|-|-|-|-|-|-|
+|TEST| | | | | | | |
+
+<p> Setting (1) the TEST bit of this register will cause a sound to be output to the speaker, the timbre of the sound is unknown and seems to come from the instructions the CPU is executing. Enabling this alongside the audio features from T1 will cause them to be logically ANDed with one another.
+
+<p> If the CPU is halted, the sound will stop, and will mask out the sound coming from the T1, muting all of the audio coming from the VMU.
+
+\section port3 Port 3
+
+\subsection p3 [0x14C] P3: Port 3 Latch
+<p>Latch register for IO Port 3, which is an input-only (supposedly) port for the VMU's gamepad buttons. The application must set the bit corresponding to a button to be detected to 1. When the button is actually pressed, the corresponding bit is reset to 0.
+
+|Bit   |7    |6   |5  |4  |3    |2   |1   |0  |
+|------|-----|----|---|---|-----|----|----|---|
+|P3    |P37  |P36 |P35|P34|P33  |P32 |P31 |P30|
+|Button|SLEEP|MODE|B  |A  |RIGHT|LEFT|DOWN|UP |
+
+\subsection p3ddr [0x14D] P3DDR: Port 3 Data Direction Register
+<p>Write-only register used to configure whether bits 7 to 0 of Port 3 are used for input or output. Setting a bit to 1 configures the corresponding port pin to be in output mode. Resetting a bit to 0 sets the pin to be in input mode.</p>
+
+\warning
+Sanyo's docs claim that this register cannot be driven by the user... but this is most likely bullshit.
+
+\subsection p3int [0x14E] P3INT: Port 3 Interrupt Control
+<p>Controls interrupt generation and configuration for Port 3.</p>
+
+|7|6|5|4|3|2     |1     |0     |
+|-|-|-|-|-|------|------|------|
+| | | | | |P32INT|P31INT|P30INT|
+
+<p><b>P32INT (bit 2): Port 3 Interrupt Control Flag</b><br>
+When set to 1, causes an interrupt to be generated continuously while a button on Port 3 is held down. When reset to 0, no interrupt for that button is generated.</p>
+
+<p><b>P31INT (bit 1): Port 3 Interrupt Source Flag</b><br>
+Applicable only when P32INT is set. When an interrupt is generated, this flag is set to 1, so that it can be used by an ISR to determine that P3 is the interrupt's source.</p>
+
+\warning
+This flag must be reset by the application within its ISR!
+
+<p><b>P30INT (bit 0): Port 3 Interrupt Request Enable Control</b><br>
+When set to 1, enables interrupt requests from port 3, calling the interrupt vector 0x004B when one is generated (P31INT=1). When reset to 0, the ISR is never called upon interrupt generation.</p>
+
+\section flash Flash
+\note
+None of this is officially documented or is public knowledge. Sanyo and Sega didn't want you to know about how to access and control flash directly. You were instead to use the firmware routines provided by the BIOS.
+
+\subsection fpr [0x154] FPR: Flash Program Register
+<p>Used to control direct access to the flash controller.</p>
+
+|7|6|5|4|3|2|1   |0   |
+|-|-|-|-|-|-|----|----|
+| | | | | | |FPR1|FPR0|
+
+<p><b>FPR1 (bit 1): Flash Write Unlock Flag</b><br>
+This flag must be set to 1 before attempting to program flash with the proper unlock sequence, which is required to enable write access to the CPU via the STF instruction. It is initially reset to 0.</p>
+
+<p><b>FPR1 (bit 0): Flash Address Bank</b><br>
+This flag controls which flash bank (0-1) the LDF and STF instructions access when reading from and writing to flash. It becomes the 17th bit of the absolute address used to for flash access.</p>
+
+<p>When reset to 0, flash bank 0 is used. When set to 1, flash bank 1 is used.</p>
+
+\section port7 Port 7
+\subsection p7 [0x15C] P7: Port 7 Latch
+<p>Dedicated input port used for low-voltage detection and for monitoring connection status to the Dreamcast.</p>
+
+|Bit     |7|6|5|4|3  |2  |1          |0        |
+|--------|-|-|-|-|---|---|-----------|---------|
+|P1      | | | | |P73|P72|P71        |P70      |
+|Function| | | | |ID1|ID0|Low voltage|5V detect|
+
+<p><b>P73 (bit 3): External Input Pin 1</b><br>
+Freely available external input pin, connected to a denoiser filter.</p>
+
+<p><b>P72 (bit 2): External Input Pin 0</b><br>
+Freely available external input pin</p>
+
+<p><b>P71 (bit 1): Low Voltage Detect Flag</b><br>
+When set to 1 (default), the low voltage detection circuit is enabled, resetting the non-latched port value for P71 to 0 when low voltage is detected.</p>
+
+<p><b>P70 (bit 0): External 5V Power Detection Flag</b><br>
+When the bit has been set to 1, an external 5v power source has been detected, meaning the VMU has been docked within the Dreamcast controller. When reset to 0, the VMU is running in standalone mode.</p>
+
+\note
+It is the responsibility of any well-formed VMU application to monitor the status of this bit and invoke the firmware application termination routine used to change the BIOS mode. The INT0 interrupt is typically used to monitor this connection status.
+
+\subsection i01cr [0x15D] I01CR: External Interrupts 0-1 Control Register
+<p>Configures the operation of external interrupts 0 and 1.</p>
+
+|7     |6     |5     |4     |3     |2     |1     |0     |
+|------|------|------|------|------|------|------|------|
+|I01CR7|I01CR6|I01CR5|I01CR4|I01CR3|I01CR2|I01CR1|I01CR0|
+
+<p><b>I01CR7-I01CR6 (bits 7-6): Interrupt 1 Detection Level/Edge Select</b><br>
+Configures the INT1 interrupt condition for signals input on the P71/INT1 pin.</p>
+
+|I01CR7|I01CR6|INT1 Interrupt Condition|
+|------|------|------------------------|
+|0     |0     |Detect falling edge     |
+|0     |1     |Detect low level        |
+|1     |0     |Detect rising edge      |
+|1     |1     |Detect high level       |
+
+<p><b>I01CR5 (bit 5): Interrupt 1 Source</b><br>
+Set to 1 when the condition specified by bits I01CR7 and I01CR6 is detected. If INT1 interrupts are enabled (I01CR4 is 1), the interrupt vector 0x00B is also called to begin interrupt processing.</p>
+
+<p><b>I01CR4 (bit 4): Interrupt 1 Control</b><br>
+When set to 1, enables interrupt processing for external INT1 interrupts, calling interrupt vector 0x00B when I01CR5 is set. When reset to 0, interrupt processing is disabled and no interrupt request is generated when I01CR5 is set.</p>
+
+<p><b>I01CR3-I01CR2 (bits 3-2): Interrupt 0 Detection Level/Edge Select</b><br>
+Configures the INT0 interrupt condition for signals input on the P70/INT0 pin.</p>
+
+|I01CR3|I01CR2|INT0 Interrupt Condition|
+|------|------|------------------------|
+|0     |0     |Detect falling edge     |
+|0     |1     |Detect low level        |
+|1     |0     |Detect rising edge      |
+|1     |1     |Detect high level       |
+
+<p><b>I01CR1 (bit 1): Interrupt 0 Source</b><br>
+Set to 1 when the condition specified by bits I01CR3 and I01CR2 is detected. If INT0 interrupts are enabled (I01CR0 is 1), the interrupt vector 0x003 is also called to begin interrupt processing.</p>
+
+<p><b>I01CR0 (bit 0): Interrupt 0 Control</b><br>
+When set to 1, enables interrupt processing for external INT0 interrupts, calling interrupt vector 0x003 when I01CR1 is set. When reset to 0, interrupt processing is disabled and no interrupt request is generated when I01CR1 is set.</p>
+
+\note
+When level-detection is used on either signal, interrupts are generated continuously while the signal remains at the high or low level.
+
+\subsection i23cr [0x15E] I23CR: External Interrupts 2-3 Control Register
+<p>Configures the operation of external interrupts 2 and 3.</p>
+
+|7     |6     |5     |4     |3     |2     |1     |0     |
+|------|------|------|------|------|------|------|------|
+|I23CR7|I23CR6|I23CR5|I23CR4|I23CR3|I23CR2|I23CR1|I23CR0|
+
+<p><b>I23CR7 (bit 7): Interrupt 3 Rising Edge Detection Control</b><br>
+Configures the INT3 interrupt condition for signals input on the P73/INT3/T0IN pin. When set to 1, the rising edge of the signal is detected. When reset to 0, the rising edge of the signal is not monitored.</p>
+
+<p><b>I23CR6 (bit 6): Interrupt 3 Falling Edge Detection Control</b><br>
+Configures the INT3 interrupt condition for signals input on the P73/INT3/T0IN pin. When set to 1, the falling edge of the signal is detected. When reset to 0, the falling edge of the signal is not monitored.</p>
+
+<p><b>I23CR5 (bit 5): Interrupt 3 Source</b><br>
+Set to 1 when the condition specified by bits I23CR7 or I23CR6 is detected. If INT3 interrupts are enabled (I23CR4 is 1), the interrupt vector 0x01B is also called to begin interrupt processing.</p>
+
+\note
+This flag must be reset by the application.
+
+<p><b>I23CR4 (bit 4): Interrupt 3 Control</b><br>
+When set to 1, enables interrupt processing for external INT3 interrupts, calling interrupt vector 0x01B when I23CR5 is set. When reset to 0, interrupt processing is disabled and no interrupt request is generated when I23CR5 is set.</p>
+
+<p><b>I23CR3 (bit 3): Interrupt 2 Rising Edge Detection Control</b><br>
+Configures the INT2 interrupt condition for signals input on the P72/INT2/T0IN pin. When set to 1, the rising edge of the signal is detected. When reset to 0, the rising edge of the signal is not monitored.</p>
+
+<p><b>I23CR2 (bit 2): Interrupt 2 Falling Edge Detection Control</b><br>
+Configures the INT2 interrupt condition for signals input on the P72/INT2/T0IN pin. When set to 1, the falling edge of the signal is detected. When reset to 0, the falling edge of the signal is not monitored.</p>
+
+<p><b>I23CR1 (bit 1): Interrupt 2 Source</b><br>
+Set to 1 when the condition specified by bits I23CR3 and I23CR2 is detected. If INT2 interrupts are enabled (I23CR0 is 1), the interrupt vector 0x013 is also called to begin interrupt processing.</p>
+
+<p><b>I23CR0 (bit 0): Interrupt 2 Control</b><br>
+When set to 1, enables interrupt processing for external INT2 interrupts, calling interrupt vector 0x013 when I23CR1 is set. When reset to 0, interrupt processing is disabled and no interrupt request is generated when I23CR1 is set.</p>
+
+\subsection isl [0x15F] ISL: Input Signal Selection
+<p>Selects and configures the source and operation of the input signals for the Base Timer and Timer 0.</p>
+
+|7|6|5   |4   |3   |2   |1   |0   |
+|-|-|----|----|----|----|----|----|
+| | |ISL5|ISL4|ISL3|ISL2|ISL1|ISL0|
+
+<p><b>ISL5-ISL4 (bits 5-4): Base Timer Clock Select</b><br>
+Selects the clock for the base timer. ISL4 is "fixed" to bit 0, while ISL5's value doesn't matter, fixing the source of the base timer to the quartz oscillator.</p>
+
+\note
+ISL4 may very well not be fixed and they just don't want you to modify the base timer's source, the following table is also included
+|ISL5|ISL4|Source                     |
+|----|----|---------------------------|
+|1   |1   |Timer/Counter T0 prescaler |
+|0   |1   |Cycle Clock                |
+|X   |0   |Quartz Oscillator          |
+
+<p><b>ISL3(bit 3): USE PROHIBITED</b><br>
+Fixed to reset value of 0: fBST/16.</p>
+
+\note
+ISL3 may very well not be fixed. The docs lie.
+
+<p><b>ISL2-ISL1 (bits 2-1): Noise Filter Time Constant Select</b><br>
+Selects the time constant of the noise filter.</p>
+
+|ISL2|ISL1|Time Constant|
+|----|----|-------------|
+|1   |1   |16 * Tcyc    |
+|0   |1   |64 * Tcyc    |
+|X   |0   |1  * Tcyc    |
+
+<p>The following table is also included (whatever-the-hell it means) with the following cautions:
+    - A signal not matching the time constant conditions is considered noise and is not input.
+    - Sometimes even a signal matching the time constant conditions may be considered noise and not input.
+    - A signal matching the time constant conditions is considered normal and is input.</p>
+
+|?            |WTF       |?        |
+|-------------|----------|---------|
+|Time Constant|Noise * 1 |Noise/   |
+|signal * 2   |Noise * 3 |         |
+|1 * Tcyc     |< 1 * Tcyc|1 * Tcyc-|
+|2 * Tcyc     |2 * Tcyc <|         |
+
+<p><b>ISL0 (bit 0): T0 Clock Input Pin Select</b><br>
+Selects the input pin used as the clock driving Timer 0. When reset to 0, the clock source is P72/INT2/T0IN. When set to 1, the source is the P73/INT3/T0IN pin.</p>
+
+\section maple Maple
+\note
+These registers are intentionally completely undocumented and hidden from application-space developers. They were meant to only be used by the BIOS when in Maple communications mode. The little that is known about them has been pieced together from BIOS disassembly...
+
+\subsection mplsw [0x160] MPLSW: Maple Status Word
+<p>Contains bits reflecting the status of a Maple transfer request.</p>
+
+\subsection mplsta [0x161] MPLSTA: Maple Start Transfer
+<p>Used to control starting and stopping a Maple transfer.</p>
+
+\subsection mplrst [0x162] MPLRST: Maple Reset
+<p>Used to reset the Maple transaction when an error has occurred.</p>
+
+\section work_ram Work RAM
+\subsection vsel [0x163] VSEL: VMS Control Register
+<p>Configures the behavior of Work RAM.</p>
+
+|7|6|5|4   |3|2|1     |0   |
+|-|-|-|----|-|-|------|----|
+| | | |INCE| | |SIOSEL|ASEL|
+
+<p><b>INCE (bit 4): VTRBF Address Counter Automatic Increment</b><br>
+This bit controls whether the VRMAD address (formed by VRMAD1 and VRMAD2) is auto-incremented when accessing VTRBF.</p>
+
+<p>When set to 1, VRMAD is automatically incremented by 1 after each VTRBF access. When reset to 0, there is no change to the address upon accessing VTRBF.
+
+<p><b>SIOSEL (bit 1): Port 1 Use Select Control</b><br>
+Configures the P1 port (P10 to P15).</p>
+
+<p>When set to 1, the port is used as a dedicated Maple interface for interacting with the Dreamcast (when the VMU is docked). When reset to 0, (default) it is used as a normal I/O port for synchronous serial communication.
+
+\note
+This bit is not typically driven by software and is managed by the BIOS.
+
+<p><b>ASEL (bit 0): VTRBF Address Input Select Control</b><br>
+Arbitrates accesses to VTRBF by either the CPU or the Maple Interface.</p>
+
+<p>When set to 1, this bit means that a transfer between the Dreamcast and WRAM is currently being carried out, and WRAM is not yet accessible by the VMU. When reset to 0, there is no Maple transfer in progress, and WRAM can be accessed normally by the VMU.
+
+\warning
+Data integrity will not be assured if an application writes to WRAM while a Maple transfer is in progress.
+
+\subsection vrmad1 [0x164] VRMAD1: Work RAM Access Address 1
+<p>Forms the lower 8 bits of the 9-bit VRMAD address that is used to access WRAM whenever the VTRBF register is used. When VSEL4 is set to 1, VRMAD is auto-incremented each time VTRBF is accessed.
+
+|7     |6     |5     |4     |3     |2     |1     |0     |
+|------|------|------|------|------|------|------|------|
+|VRMAD7|VRMAD6|VRMAD5|VRMAD4|VRMAD3|VRMAD2|VRMAD1|VRMAD0|
+
+\subsection vrmad2 [0x165] VRMAD2: Work RAM Access Address 2
+<p>Provides the 9th bit of the VRMAD address that is used to access WRAM whenever the VTRBF register is used. When VSEL4 is set to 1, VRMAD is auto-incremented each time VTRBF is accessed.
+
+|7|6|5|4|3|2|1|0     |
+|-|-|-|-|-|-|-|------|
+| | | | | | | |VRMAD8|
+
+\subsection vtrbf [0x166] VTRBF: Send/Receive Buffer
+<p>Used as the data buffer for reading and writing to WRAM at the address specified by VRMAD.</p>
+
+<p>When this register is written to, the data are written to WRAM at the address specified by VRMAD. When this register is read from, the data are read from WRAM at the address specified by VRMAD. When bit 4 of VSEL (VSEL4) is set to 1, VRMAD is automatically incremented each time this register is accessed.
+
+\subsection vlreg [0x167] VLREG: Maple Word Length Registration
+<p>Undocumented register controlling the length of words for Maple transactions when the VMU is docked in the controller and the BIOS is running the Maple stack.</p>
+
+\section undocumented_read_registers Undocumented Read Registers
+
+\subsection rr0 [0x168] RR0: Read Register 0
+<p>Undocumented register that can only be read, writing has no effect. The value it reads seems to be changed at random every time the VMU is plugged and unplugged from the Dreamcast.
+
+\subsection rr1 [0x169] RR1: Read Register 1
+<p>Undocumented register that can only be read, writing has no effect. Same as above, but the value may be different.
+
+\subsection rr2 [0x16A] RR2: Read Register 2
+<p>Undocumented register that can only be read, writing has no effect. Same as above, but the value may be different.
+
+\subsection rr3 [0x16B] RR3: Read Register 3
+<p>Undocumented register that can only be read, writing has no effect. Same as above, but the value may be different.
+
+
+
+\section base_timer Base Timer
+\subsection btcr [0x17F] BTCR: Base Timer Control Register
+<p>Controls the configuration and interrupt generation of the Base Timer.</p>
+
+\warning
+Special care must be taken when working with the Base Timer, because it is configured to generate Base Timer Interrupt 0 at a fixed 0.5s interval. This interrupt is serviced by the BIOS, which uses it to maintain the current time. When providing an ISR for the Base Timer Interrupts (which both share vector 0x001B), you must take care to call into the BIOS implementation at 0.5s intervals to maintain the correct system time.
+
+\warning
+The following additional warnings are also issued by Sanyo for driving the Base Timer:
+    - In fast-forward mode (BTCR7, BTCR5 = 1), do not set both the system clock and the base timer to the quartz oscillator.
+    - BTCR may occasionally become "0" when BTCR5 and BTCR4 are changed. This is a rare occurrence, but to guard against it, you should save the value of BTCR3 before changing BTCR5 and BTCR4 and then set the value again in BTCR3 after the change.
+
+|7    |6    |5    |4    |3    |2    |1    |0    |
+|-----|-----|-----|-----|-----|-----|-----|-----|
+|BTCR7|BTCR6|BTCR5|BTCR4|BTCR3|BTCR2|BTCR1|BTCR0|
+
+<p><b>BTCR7 (bit 7): Base Timer Interrupt 0 Cycle Control</b><br>
+Controls the cycle for Base Timer Interrupt 0 source generation.</p>
+
+<p>When the value is set to 1, the interval at which the interrupt 0 source is generated for 14-bit counter overflow is 64/fBST. When reset to 0, the cycle is 16384/fBST. To use "fast-forward mode," set this flag. fBST is the input clock frequency.</p>
+
+\warning
+Sanyo's hardware docs claim it should only be set to 16384/fBST, presumably because changing its value will impact the timing for the BIOS clock. fBST is the input clock frequency.
+
+<p><b>BTCR6 (bit 6): Base Timer Operation Control</b><br>
+Starts or stops the Base Timer's count operation.</p>
+
+<p>When set to 1, count operation starts. When reset to 0, the count operation stops, and the 14-bit counter is cleared.</p>
+
+\warning
+Sanyo's hardware docs say it should always be active. Again, this is because the BIOS clock relies on it for time keeping.
+
+<p><b>BTCR5-BTCR4 (bits 5-4): Base Timer Interrupt 1 Cycle Control</b><br>
+Controls the cycle for Base Timer Interrupt 1 source generation.</p>
+
+|BTCR7|BTCR5|BTCR4|Base Timer Interrupt 1 Cycle|
+|-----|-----|-----|----------------------------|
+|X    |0    |0    |32  /fBST                   |
+|X    |0    |1    |128 /fBST                   |
+|0    |1    |0    |512 /fBST                   |
+|0    |1    |1    |2048/fBST                   |
+
+fBST: Input clock frequency
+
+<p><b>BTCR3 (bit 3): Base Timer Interrupt 1 Source Flag</b><br>
+This flag gets set any time the Base Timer Interrupt 1 source is generated at the cycle set with BTCR7 and BTCR5-4. When no interrupt is generated, the flag doesn't change.</p>
+
+\note
+It's up to the user to reset the flag within the appropriate ISR.
+
+<p><b>BTCR2 (bit 2): Base Timer Interrupt 1 Request Enable Control</b><br>
+Enables or disables Base Timer Interrupt 1 requests.</p>
+
+<p>When set to 1, the Base Timer Interrupt 1 Source Flag (BTCR3) will generate an interrupt request to interrupt vector 0x001B. When reset to 0, no interrupt request will be generated.</p>
+
+<p><b>BTCR1 (bit 1): Base Timer Interrupt 0 Source Flag</b><br>
+This flag gets set any time the Base Timer Interrupt 0 source is generated at the cycle set with BTCR7. When no interrupt is generated, the flag doesn't change.</p>
+
+\note
+It's up to the user to reset the flag within the appropriate ISR.
+
+<p><b>BTCR0 (bit 0): Base Timer Interrupt 0 Request Enable Control</b><br>
+Enables or disables Base Timer Interrupt 1 requests.</p>
+
+<p>When set to 1, the Base Timer Interrupt 0 Source Flag (BTCR1) will generate an interrupt request to interrupt vector 0x001B. When reset to 0, no interrupt request will be generated.</p>
+
+\warning
+Disabling this interrupt will cause the BIOS to cease to maintain the current time.
+*/

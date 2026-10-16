@@ -1,0 +1,6 @@
+build/
+.cache/
+*.log
+__pycache__/
+sdkconfig.old
+tools/push_to_github.sh

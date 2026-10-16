@@ -1,0 +1,115 @@
+/*! \file
+ *  \brief Miscellaneous macro utilities and meta generators
+ *  \ingroup preprocessor
+ *  \sa gimbal_macro_composition.h, gimbal_macro_sequences.h
+ *
+ *  \author 2025 Falco Girgis
+ *  \author 2025 Agustín Bellagamba
+ *  \copyright MIT License
+ */
+
+#ifndef GIMBAL_MACRO_UTILS_H
+#define GIMBAL_MACRO_UTILS_H
+
+#include "gimbal_compiler.h"
+#include "gimbal_macro_composition.h"
+#include "../core/gimbal_config.h"
+#include <stdint.h>
+
+#ifdef __cplusplus
+#include <functional>
+extern "C" {
+#endif
+
+#define GBL_MIN(a, b)                       (((a) < (b))? (a) : (b))
+#define GBL_MAX(a, b)                       (((a) > (b))? (a) : (b))
+#define GBL_CEIL(numerator, denominator)    ((numerator / denominator + (numerator % denominator != 0)))
+#define GBL_CLAMP(n, min, max)              (((n) > (max)) ? (max) : (((n) < (min)) ? (min) : (n)))
+
+#define GBL_BIT_MASK_2(bits, offset)        (((1u << bits) - 1u) << offset)
+#define GBL_BIT_MASK_1(bits)                GBL_BIT_MASK_2(bits, 0)
+#define GBL_BIT_MASK(...)                   GBL_VA_OVERLOAD_CALL_ARGC(GBL_BIT_MASK, __VA_ARGS__)
+
+#define GBL_BCD_BYTE_PACK(n)                (((n / 10) << 4) | (n % 10))            // 0-99
+#define GBL_BCD_BYTE_UNPACK(n)              (unsigned)(((n >> 4) * 10) + (n & 0xf))
+
+#define GBL_CONTAINER_OF(ptr, type, member) ((type*)((char*)(ptr) - offsetof(type, member)))
+#define GBL_COUNT_OF(array)                 (sizeof(array) / sizeof(array[0]))
+
+#define GBL_PTR_OFFSET(...)                 GBL_VA_OVERLOAD_CALL_ARGC(GBL_PTR_OFFSET, __VA_ARGS__)
+#define GBL_PTR_OFFSET_3(type, ptr, bytes)  ((type)(((uintptr_t)ptr) + bytes))
+#define GBL_PTR_OFFSET_2(ptr, bytes)        GBL_PTR_OFFSET_3(void*, ptr, bytes)
+
+#define GBL_SWITCH_CASE_STRINGIFY(s)        case s: return #s
+
+#define GBL_LABEL_EMPTY(name)               name: {;}
+
+#define GBL_SWAP(x,y)                                       \
+    GBL_STMT_START {                                        \
+        unsigned char swap_temp[sizeof(x) == sizeof(y) ?    \
+                               (signed)sizeof(x) : -1];     \
+        memcpy(swap_temp, &y, sizeof(x));                   \
+        memcpy(&y, &x,        sizeof(x));                   \
+        memcpy(&x, swap_temp, sizeof(x));                   \
+    } GBL_STMT_END
+
+#define GBL_ASSERT(...)  \
+    GBL_VA_OVERLOAD_SELECT(GBL_ASSERT, GBL_VA_OVERLOAD_SUFFIXER_ARGC, __VA_ARGS__)(__VA_ARGS__)
+
+//! Used to declare an endian-independent group of bitfields.
+#define GBL_BIT_FIELDS(...) \
+    GBL_TUPLE_FOREACH(GBL_BIT_FIELDS_ENTRY_, GBL_PHONY, GBL_BIT_FIELDS_ENDIAN_XFORM_ (__VA_ARGS__))
+
+#ifndef __cplusplus
+#   define GBL_META_GENERIC_MACRO_GENERATE(traits, X)                                                       \
+    _Generic((X),                                                                                           \
+        GBL_MAP_TUPLES(GBL_META_GENERIC_MACRO_TRAIT_OVERLOADS_DECLARE_CASE_C_,                              \
+                       GBL_MAP_TUPLES(GBL_EVAL, GBL_META_GENERIC_MACRO_TRAIT_PROPERTY_OVERLOADS_ traits))   \
+        default:  GBL_EVAL(GBL_META_GENERIC_MACRO_TRAIT_PROPERTY_DEFAULT traits)                            \
+    )
+#else
+#   define GBL_META_GENERIC_MACRO_GENERATE(traits, X)                                                                       \
+     [](auto&&... args) {                                                                                                   \
+        using GenericType = decltype(X);                                                                                    \
+        if constexpr(false);                                                                                                \
+        GBL_MAP_TUPLES(GBL_META_GENERIC_MACRO_TRAIT_OVERLOADS_DECLARE_CASE_CPP_,                                            \
+                       GBL_MAP_TUPLES(GBL_EVAL, GBL_META_GENERIC_MACRO_TRAIT_PROPERTY_OVERLOADS_ traits))                   \
+        else if constexpr(requires { GBL_EVAL(GBL_META_GENERIC_MACRO_TRAIT_PROPERTY_DEFAULT_ traits)                        \
+                                             (std::forward<decltype(args)>(args)...); })                                    \
+            return GBL_EVAL(GBL_META_GENERIC_MACRO_TRAIT_PROPERTY_DEFAULT_ traits)(std::forward<decltype(args)>(args)...);  \
+    }
+#endif
+
+#define GBL_META_GENERIC_MACRO_TRAIT_PROPERTY_DEFAULT(defaultFunc, overloads)        defaultFunc
+#define GBL_META_GENERIC_MACRO_NO_DEFAULT                                            GBL_NULL
+
+// ===== Implementation ======
+///\cond
+#define GBL_BIT_FIELDS_ENTRY_(a, b) b;
+
+#if GBL_BIG_ENDIAN
+#   define GBL_BIT_FIELDS_ENDIAN_XFORM_(...) (__VA_ARGS__)
+#else
+#   define GBL_BIT_FIELDS_ENDIAN_XFORM_(...) (GBL_REVERSE(__VA_ARGS__))
+#endif
+
+#define GBL_META_GENERIC_MACRO_TRAIT_PROPERTY_OVERLOADS_(defaultFunc, overloads)     overloads
+#define GBL_META_GENERIC_MACRO_TRAIT_OVERLOADS_PROPERTY_TYPE_(type, function)        type
+#define GBL_META_GENERIC_MACRO_TRAIT_OVERLOADS_PROPERTY_FUNCTION_(type, function)    function
+
+#define GBL_META_GENERIC_MACRO_TRAIT_OVERLOADS_DECLARE_CASE_C_(type, function) \
+    type: function,
+
+#define GBL_META_GENERIC_MACRO_TRAIT_OVERLOADS_DECLARE_CASE_CPP_(type, function) \
+    else if constexpr(std::same_as<GenericType, type>) return function(std::forward<decltype(args)>(args)...);
+///\endcond
+#ifdef __cplusplus
+}
+#endif
+
+#define GBL_SCOPE(begin, end) for (int GBL_APPEND_LINE(gblscope_) = ((begin), 0); GBL_APPEND_LINE(gblscope_) < 1; ++GBL_APPEND_LINE(gblscope_), (end))
+#define GBL_SCOPE_EXIT continue
+
+#define GBL_APPEND_LINE(a)  GBL_GLUE(GBL_GLUE(a, ), __LINE__)
+
+#endif // GIMBAL_MACRO_UTILS_H

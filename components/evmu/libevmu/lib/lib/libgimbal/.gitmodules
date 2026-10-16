@@ -1,0 +1,9 @@
+[submodule "lib/lib/tiny-regex-c"]
+	path = lib/lib/tiny-regex-c
+	url = https://github.com/gyrovorbis/tiny-regex-c.git
+[submodule "lib/lib/tinycthread"]
+	path = lib/lib/tinycthread
+	url = https://github.com/gyrovorbis/tinycthread.git
+[submodule "lib/lib/lz4"]
+	path = lib/lib/lz4
+	url = https://github.com/gyrovorbis/lz4.git
