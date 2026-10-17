@@ -1,0 +1,14 @@
+--- a/lib/api/gimbal/preprocessor/gimbal_compiler.h
++++ b/lib/api/gimbal/preprocessor/gimbal_compiler.h
+@@ -18,7 +18,11 @@
+ #ifndef GIMBAL_COMPILER_H
+ #define GIMBAL_COMPILER_H
+
++/* ESP32 port: IDF's picolibc headers break with Annex K requested, and the
++ * Annex K wrappers below are compiled out anyway. */
++#if !defined(__XTENSA__) && !defined(__riscv)
+ #define __STDC_WANT_LIB_EXT1__ 1
++#endif
+
+ #include <stddef.h>
+ #include <stdint.h>

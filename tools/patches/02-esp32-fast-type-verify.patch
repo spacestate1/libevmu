@@ -1,0 +1,15 @@
+--- a/lib/source/meta/types/gimbal_type.c
++++ b/lib/source/meta/types/gimbal_type.c
+@@ -1029,6 +1029,12 @@
+ }
+
+ GBL_EXPORT GblBool GblType_verify(GblType type) {
++#if defined(__XTENSA__) || defined(__riscv) || defined(GBL_FAST_TYPE_VERIFY)
++    /* ESP32 port: the registry lookup below takes a FreeRTOS mutex and runs on
++     * every cast, which made emulation ~100x too slow. Types are never
++     * unregistered here, so any non-null type handle is a registered one. */
++    return type != GBL_INVALID_TYPE;
++#endif
+     GblBool valid = GBL_FALSE;
+     if(type != GBL_INVALID_TYPE) {
+         const GblQuark nameQuark     = GblType_nameQuark(type);
